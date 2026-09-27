@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "PyroWave.h"
 
 // Uncomment to test 3 byte Annex B start sequences with GFE
 //#define FORCE_3_BYTE_START_SEQUENCES
@@ -103,6 +104,14 @@ static void dropFrameState(void) {
     // We're dropping frame state now
     dropStatePending = false;
 
+    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+        // Each frame is independently decodable; loss requires no IDR/RFI recovery.
+        waitingForIdrFrame = false;
+        waitingForRefInvalFrame = false;
+        waitingForNextSuccessfulFrame = false;
+        cleanupFrameState();
+        return;
+    }
     if (strictIdrFrameWait || !idrFrameProcessed || waitingForIdrFrame || (nalChainHead && frameType == FRAME_TYPE_IDR)) {
         // We'll need an IDR frame now if we're in non-RFI mode, if we've never
         // received an IDR frame, if we explicitly need an IDR frame, or if we
@@ -215,8 +224,8 @@ void validateDecodeUnitForPlayback(PDECODE_UNIT decodeUnit) {
             LC_ASSERT_VT(decodeUnit->bufferList->next->next->bufferType == BUFFER_TYPE_PPS);
             LC_ASSERT_VT(decodeUnit->bufferList->next->next->next != NULL);
         }
-        else if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_AV1) {
-            // We don't parse the AV1 bitstream
+        else if (NegotiatedVideoFormat & (VIDEO_FORMAT_MASK_AV1 | VIDEO_FORMAT_MASK_PYROWAVE)) {
+            // Opaque bitstreams are passed through without Annex B parsing.
             LC_ASSERT_VT(decodeUnit->bufferList->bufferType == BUFFER_TYPE_PICDATA);
         }
         else {
@@ -1065,6 +1074,14 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
             }
         }
 
+        if ((NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) &&
+            currentPos.length > PYROWAVE_MAX_FRAME_BYTES - (unsigned)nalChainDataLength) {
+            decodingFrame = false;
+            nextFrameNumber = frameIndex + 1;
+            dropFrameState();
+            return;
+        }
+
         // Other codecs are just passed through as is.
         queueFragment(existingEntry, currentPos.data, currentPos.offset, currentPos.length);
     }
@@ -1136,6 +1153,11 @@ void notifyFrameLost(unsigned int frameNumber, bool speculative) {
 
     // Drop state and determine if we need an IDR frame or if RFI is okay
     dropFrameState();
+
+    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+        nextFrameNumber = frameNumber + 1;
+        return;
+    }
 
     // If dropFrameState() determined that RFI was usable, issue it now
     if (!waitingForIdrFrame) {

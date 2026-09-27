@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "PyroWave.h"
 #include "Rtsp.h"
 
 #define RTSP_CONNECT_TIMEOUT_SEC 10
@@ -1087,7 +1088,25 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
             goto Exit;
         }
 
-        if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {
+        int pyroFormat = 0;
+        if (IS_SUNSHINE() && strstr(response.payload, "a=x-ss-pyrowave.version:1\r\n")) {
+            pyroFormat = LiSelectPyroWaveFormat(StreamConfig.supportedVideoFormats,
+                                               serverInfo->serverCodecModeSupport, response.payload);
+        }
+        if (pyroFormat) {
+            NegotiatedVideoFormat = pyroFormat;
+            Limelog("Negotiated PyroWave (%s, %s)\n",
+                    pyroFormat & VIDEO_FORMAT_PYROWAVE_444 ? "4:4:4" : "4:2:0",
+                    pyroFormat & VIDEO_FORMAT_PYROWAVE_HDR ? "HDR" : "SDR");
+        }
+        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) &&
+                 !(StreamConfig.supportedVideoFormats & (VIDEO_FORMAT_MASK_H264 | VIDEO_FORMAT_MASK_H265 | VIDEO_FORMAT_MASK_AV1))) {
+            Limelog("Host does not support requested PyroWave wire version or color mode\n");
+            freeMessage(&response);
+            ret = -1;
+            goto Exit;
+        }
+        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {
             if ((serverInfo->serverCodecModeSupport & SCM_AV1_HIGH10_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_AV1_HIGH10_444)) {
                 NegotiatedVideoFormat = VIDEO_FORMAT_AV1_HIGH10_444;
             }

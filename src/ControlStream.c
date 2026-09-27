@@ -413,6 +413,7 @@ static void queueFrameInvalidationTuple(uint32_t startFrame, uint32_t endFrame) 
 
 // Request an IDR frame on demand by the decoder
 void LiRequestIdrFrame(void) {
+    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) return;
     // Any reference frame invalidation requests should be dropped now.
     // We require a full IDR frame to recover.
     freeBasicLbqList(LbqFlushQueueItems(&referenceFrameControlQueue));
@@ -423,6 +424,7 @@ void LiRequestIdrFrame(void) {
 
 // Invalidate reference frames lost by the network
 void connectionDetectedFrameLoss(uint32_t startFrame, uint32_t endFrame) {
+    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) return;
     queueFrameInvalidationTuple(startFrame, endFrame);
 }
 

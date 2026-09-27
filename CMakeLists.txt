@@ -117,3 +117,12 @@ target_include_directories(moonlight-common-c SYSTEM PRIVATE
 )
 
 target_compile_definitions(moonlight-common-c PRIVATE HAS_SOCKLEN_T)
+
+option(PYROWAVE_PROTOCOL_TESTS "Build private codec protocol tests" OFF)
+if(PYROWAVE_PROTOCOL_TESTS)
+  enable_testing()
+  add_executable(pyrowave-protocol-test tests/pyrowave_protocol.c)
+  target_include_directories(pyrowave-protocol-test PRIVATE src enet/include)
+  target_link_libraries(pyrowave-protocol-test PRIVATE moonlight-common-c)
+  add_test(NAME pyrowave-protocol COMMAND pyrowave-protocol-test)
+endif()
