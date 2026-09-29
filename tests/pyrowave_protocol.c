@@ -7,16 +7,18 @@
 
 static unsigned delivered;
 static const unsigned char payload[2000] = {0, 0, 1, 0x67, 0, 0, 1, 0x68};
+static const unsigned char* expectedPayload = payload;
+static size_t expectedPayloadSize = sizeof(payload);
 static int submit(PDECODE_UNIT du) {
-    assert(du->fullLength == sizeof(payload));
+    assert(du->fullLength == (int)expectedPayloadSize);
     size_t offset = 0;
     for (PLENTRY e = du->bufferList; e; e = e->next) {
         assert(e->bufferType == BUFFER_TYPE_PICDATA);
-        assert(e->length <= sizeof(payload) - offset);
-        assert(!memcmp(e->data, payload + offset, e->length));
+        assert(e->length <= expectedPayloadSize - offset);
+        assert(!memcmp(e->data, expectedPayload + offset, e->length));
         offset += e->length;
     }
-    assert(offset == sizeof(payload)); delivered++;
+    assert(offset == expectedPayloadSize); delivered++;
     return DR_OK;
 }
 static void send_packet(unsigned frame, unsigned spi, bool first) {
@@ -57,6 +59,70 @@ static void test_reassembly(void) {
     destroyVideoDepacketizer();
 }
 
+static void send_large_frame(unsigned frame, unsigned* spi, const unsigned char* framePayload,
+                             size_t framePayloadSize, unsigned packetCount) {
+    const size_t shardPayloadSize = 1376;
+    assert(framePayloadSize + 8 == (size_t)packetCount * shardPayloadSize);
+    for (unsigned i = 0; i < packetCount; i++) {
+        const size_t bytes = sizeof(RTP_PACKET) + sizeof(NV_VIDEO_PACKET) + shardPayloadSize;
+        const size_t entryOffset = (bytes + 15) & ~(size_t)15;
+        char* allocation = calloc(1, entryOffset + sizeof(RTPV_QUEUE_ENTRY));
+        assert(allocation);
+        PRTP_PACKET rtp = (PRTP_PACKET)allocation;
+        PNV_VIDEO_PACKET nv = (PNV_VIDEO_PACKET)(rtp + 1);
+        nv->frameIndex = frame;
+        nv->streamPacketIndex = (*spi)++ << 8;
+        nv->flags = FLAG_CONTAINS_PIC_DATA |
+                    (i == 0 ? FLAG_SOF : 0) |
+                    (i + 1 == packetCount ? FLAG_EOF : 0);
+        char* data = (char*)(nv + 1);
+        const size_t logicalOffset = (size_t)i * shardPayloadSize;
+        if (i == 0) {
+            data[0] = 1;
+            data[3] = 2;
+            data[4] = shardPayloadSize & 255;
+            data[5] = shardPayloadSize >> 8;
+            memcpy(data + 8, framePayload, shardPayloadSize - 8);
+        }
+        else {
+            memcpy(data, framePayload + logicalOffset - 8, shardPayloadSize);
+        }
+        PRTPV_QUEUE_ENTRY entry = (PRTPV_QUEUE_ENTRY)(allocation + entryOffset);
+        entry->packet = rtp;
+        entry->length = bytes;
+        entry->receiveTimeUs = 100000 + frame * 8333;
+        queueRtpPacket(entry);
+    }
+}
+
+static void test_large_packet_count_reassembly(void) {
+    NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE;
+    AppVersionQuad[2] = 450;
+    VideoCallbacks.capabilities = CAPABILITY_DIRECT_SUBMIT;
+    VideoCallbacks.submitDecodeUnit = submit;
+    initializeVideoDepacketizer(1392);
+    unsigned spi = 0;
+    unsigned frame = 1;
+    const unsigned before = delivered;
+    // 276 = 6 GSO chunks, 322 = exactly 7, 323 = 7 + 1 shard,
+    // and 368 = exactly 8 with the host's 46-segment GSO payload cap.
+    const unsigned packetCounts[] = {276, 322, 323, 368, 361};
+    for (unsigned i = 0; i < sizeof(packetCounts) / sizeof(packetCounts[0]); i++, frame++) {
+        const size_t size = (size_t)packetCounts[i] * 1376 - 8;
+        unsigned char* largePayload = malloc(size);
+        assert(largePayload);
+        for (size_t j = 0; j < size; j++) largePayload[j] = (unsigned char)(j * 131u + frame);
+        expectedPayload = largePayload;
+        expectedPayloadSize = size;
+        send_large_frame(frame, &spi, largePayload, size, packetCounts[i]);
+        free(largePayload);
+    }
+    expectedPayload = payload;
+    expectedPayloadSize = sizeof(payload);
+    assert(delivered == before + sizeof(packetCounts) / sizeof(packetCounts[0]));
+    destroyVideoDepacketizer();
+}
+
 int main(void) {
     const char *v1 = "v=0\r\na=x-ss-pyrowave.version:1\r\n";
     const int modes = SCM_MASK_PYROWAVE | SCM_H264 | SCM_HEVC | SCM_AV1_MAIN8;
@@ -78,6 +144,11 @@ int main(void) {
     assert(LiPyroWaveFrameBudget(1000000, 120) == 1041664);
     assert(LiPyroWaveFrameBudget(2000000, 120) == 2083332);
     assert(LiPyroWaveFrameBudget(2000000, 60) == 0); // Transport frame bound.
+    const int boundaryRatesKbps[] = {400000, 424000, 425000, 426000, 500000, 750000, 1000000, 2000000};
+    for (unsigned i = 0; i < sizeof(boundaryRatesKbps) / sizeof(boundaryRatesKbps[0]); i++) {
+        const uint64_t expected = ((uint64_t)boundaryRatesKbps[i] * 1000 / (120 * 8)) & ~(uint64_t)3;
+        assert(LiPyroWaveFrameBudget(boundaryRatesKbps[i], 120) == expected);
+    }
     assert(LiPyroWaveFrameBudget(INT_MAX, 60) == 0);
     assert(LiPyroWaveFrameBudget(-1, 60) == 0);
     assert(LiPyroWaveFrameBudget(200000, 0) == 0);
@@ -107,5 +178,6 @@ int main(void) {
         free(payload);
     }
     test_reassembly();
+    test_large_packet_count_reassembly();
     puts("H264/HEVC/AV1/PyroWave SDP + HDR/444/rate/reassembly/loss tests passed");
 }
