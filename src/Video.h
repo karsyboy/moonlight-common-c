@@ -86,3 +86,5 @@ typedef struct _SS_RFI_REQUEST {
 } SS_RFI_REQUEST, *PSS_RFI_REQUEST;
 
 #pragma pack(pop)
+
+#define NV_VIDEO_PACKET_EXTRA_FLAG_PYROWAVE_RECORD_START 0x80

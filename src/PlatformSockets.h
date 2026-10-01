@@ -146,3 +146,5 @@ void exitLowLatencyMode(void);
 
 int initializePlatformSockets(void);
 void cleanupPlatformSockets(void);
+
+int recvUdpSocketWithTimeout(SOCKET s, char* buffer, int size, int timeoutMs);

@@ -112,6 +112,9 @@ void LiInitializeStreamConfiguration(PSTREAM_CONFIGURATION streamConfig);
 #define BUFFER_TYPE_SPS      0x01
 #define BUFFER_TYPE_PPS      0x02
 #define BUFFER_TYPE_VPS      0x03
+// Negotiated record transport only: missing shard or verified record boundary.
+#define BUFFER_TYPE_LOST 0x04
+#define BUFFER_TYPE_RECORD_START 0x05
 
 typedef struct _LENTRY {
     // Pointer to the next entry or NULL if this is the last entry
@@ -123,7 +126,7 @@ typedef struct _LENTRY {
     // Size of data in bytes (never <= 0)
     int length;
 
-    // Buffer type (listed above, only set for H.264 and HEVC formats)
+    // Buffer type: NAL kind for H.264/HEVC; record metadata only for negotiated PyroWave records.
     int bufferType;
 } LENTRY, *PLENTRY;
 
@@ -153,6 +156,9 @@ typedef struct _DECODE_UNIT {
     // or frame processing latency is not applicable to the current frame
     // (happens when the frame is repeated).
     uint16_t frameHostProcessingLatency;
+    // Leading record packets containing the coarse wavelet prefix; zero for native/conventional.
+    // Consumers must build against this header alongside the common-c library.
+    uint16_t pyrowaveCriticalPackets;
 
     // Receive time of first buffer in microseconds.
     uint64_t receiveTimeUs;
@@ -232,6 +238,16 @@ typedef struct _DECODE_UNIT {
 #define VIDEO_FORMAT_AV1_MAIN10      0x2000 // AV1 Main 10-bit profile
 #define VIDEO_FORMAT_AV1_HIGH8_444   0x4000 // AV1 High 4:4:4 8-bit profile
 #define VIDEO_FORMAT_AV1_HIGH10_444  0x8000 // AV1 High 4:4:4 10-bit profile
+
+// Setup-only transport choice; reset on each connection. Local format bits
+// remain orthogonal and do not inherit foreign SCM/profile bit semantics.
+typedef enum _PYROWAVE_DIALECT {
+    PYROWAVE_DIALECT_NONE = 0,
+    PYROWAVE_DIALECT_NATIVE_WIRE_V1,
+    PYROWAVE_DIALECT_RECORD_FRAMED
+} PYROWAVE_DIALECT;
+PYROWAVE_DIALECT LiGetPyroWaveDialect(void);
+const char* LiGetPyroWaveCompatibilityError(void);
 
 // Private Sunshine/Moonlight extension, PyroWave bitstream version 1.
 // HDR is an orthogonal color-metadata requirement, not a bit-depth profile.

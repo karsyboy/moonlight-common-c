@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "PyroWave.h"
 #include <inttypes.h>
 
 #define MAX_OPTION_NAME_LEN 128
@@ -433,7 +434,16 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
 
         if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
             err |= addAttributeString(&optionHead, "x-nv-vqos[0].bitStreamFormat", "3");
-            err |= addAttributeString(&optionHead, "x-ss-pyrowave.version", "1");
+            err |= addAttributeString(&optionHead, "x-ss-pyrowave.bitstream", PYROWAVE_BITSTREAM_ID);
+            if (LiGetPyroWaveDialect() == PYROWAVE_DIALECT_RECORD_FRAMED) {
+                err |= addAttributeString(&optionHead, "x-ss-pyrowave.dialect", "record-framed");
+                err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowaveAdaptiveFec", "0");
+                err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowaveAdaptiveBitrate", "0");
+                err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowaveFeatures", "1");
+            } else {
+                err |= addAttributeString(&optionHead, "x-ss-pyrowave.version", "1");
+                err |= addAttributeString(&optionHead, "x-ss-pyrowave.dialect", "native-wire-v1");
+            }
         }
         else if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_AV1) {
             err |= addAttributeString(&optionHead, "x-nv-vqos[0].bitStreamFormat", "2");

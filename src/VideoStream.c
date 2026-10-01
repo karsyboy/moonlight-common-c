@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "PyroWave.h"
 
 #define FIRST_FRAME_MAX 1500
 #define FIRST_FRAME_TIMEOUT_SEC 10
@@ -32,7 +33,6 @@ static bool receivedFullFrame;
 // much kernel memory with larger packet sizes. It also
 // can smooth over transient pauses in network traffic
 // and subsequent packet/frame bursts that follow.
-#define RTP_RECV_PACKETS_BUFFERED 2048
 
 // Initialize the video stream
 void initializeVideoStream(void) {
@@ -91,6 +91,7 @@ static void VideoReceiveThreadProc(void* context) {
     bool useSelect;
     int waitingForVideoMs;
     bool encrypted;
+    bool recordTimeout;
 
     encrypted = !!(EncryptionFeaturesEnabled & SS_ENC_VIDEO);
     decryptedSize = StreamConfig.packetSize + MAX_RTP_HEADER_SIZE;
@@ -99,7 +100,9 @@ static void VideoReceiveThreadProc(void* context) {
     bufferSize = decryptedSize + sizeof(RTPV_QUEUE_ENTRY);
     buffer = NULL;
 
-    if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
+    recordTimeout = LiGetPyroWaveDialect() == PYROWAVE_DIALECT_RECORD_FRAMED && setSocketNonBlocking(rtpSocket, true) == 0;
+    if (recordTimeout) { useSelect = false; }
+    else if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
         // SO_RCVTIMEO failed, so use select() to wait
         useSelect = true;
     }
@@ -134,16 +137,23 @@ static void VideoReceiveThreadProc(void* context) {
             }
         }
 
-        err = recvUdpSocket(rtpSocket,
-                            encrypted ? encryptedBuffer : buffer,
-                            receiveSize,
-                            useSelect);
+        if (recordTimeout) {
+            uint64_t deadline = RtpvGetPendingFrameDeadlineUs(&rtpQueue);
+            uint64_t now = PltGetMicroseconds();
+            uint64_t remaining = deadline > now ? deadline - now : 0;
+            int timeout = deadline ? (int)((remaining + 999) / 1000) : UDP_RECV_POLL_TIMEOUT_MS;
+            if (timeout > UDP_RECV_POLL_TIMEOUT_MS) timeout = UDP_RECV_POLL_TIMEOUT_MS;
+            err = recvUdpSocketWithTimeout(rtpSocket, encrypted ? encryptedBuffer : buffer, receiveSize, timeout);
+        } else {
+            err = recvUdpSocket(rtpSocket, encrypted ? encryptedBuffer : buffer, receiveSize, useSelect);
+        }
         if (err < 0) {
             Limelog("Video Receive: recvUdpSocket() failed: %d\n", (int)LastSocketError());
             ListenerCallbacks.connectionTerminated(LastSocketFail());
             break;
         }
         else if  (err == 0) {
+            if (recordTimeout) RtpvExpirePendingFrame(&rtpQueue, PltGetMicroseconds());
             if (!receivedDataFromPeer) {
                 // If we wait many seconds without ever receiving a video packet,
                 // assume something is broken and terminate the connection.
@@ -329,12 +339,31 @@ int startVideoStream(void* rendererContext, int drFlags) {
     }
 
     rtpSocket = bindUdpSocket(RemoteAddr.ss_family, &LocalAddr, AddrLen,
-                              RTP_RECV_PACKETS_BUFFERED * (StreamConfig.packetSize + MAX_RTP_HEADER_SIZE),
+                              LiVideoReceiveBufferSize(StreamConfig.packetSize, NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE),
                               SOCK_QOS_TYPE_VIDEO);
     if (rtpSocket == INVALID_SOCKET) {
         VideoCallbacks.cleanup();
         return LastSocketError();
     }
+    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+        int actual = 0;
+        SOCKADDR_LEN length = sizeof(actual);
+        int desired = LiVideoReceiveBufferSize(StreamConfig.packetSize, 1);
+        if (getsockopt(rtpSocket, SOL_SOCKET, SO_RCVBUF, (char*)&actual, &length) == 0) {
+            int effective = actual;
+#ifdef __linux__
+            // Linux returns twice the SO_RCVBUF request for kernel bookkeeping.
+            effective /= 2;
+#endif
+            Limelog("PyroWave video receive buffer: desired=%d actual=%d effective=%d bytes%s\n",
+                    desired, actual, effective, effective < desired ? " (OS limited/clamped request)" : "");
+        }
+        else {
+            Limelog("PyroWave video receive buffer: desired=%d bytes, actual unknown (error %d)\n",
+                    desired, LastSocketError());
+        }
+    }
+
 
     VideoCallbacks.start();
 

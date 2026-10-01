@@ -7,6 +7,11 @@
 #define RTSP_RETRY_DELAY_MS 500
 #define MAX_RTSP_RESPONSE_SIZE (1024 * 1024)
 
+static PYROWAVE_DIALECT pyrowaveDialect;
+static char pyrowaveCompatibilityError[256];
+PYROWAVE_DIALECT LiGetPyroWaveDialect(void) { return pyrowaveDialect; }
+const char* LiGetPyroWaveCompatibilityError(void) { return pyrowaveCompatibilityError[0] ? pyrowaveCompatibilityError : NULL; }
+
 static int currentSeqNumber;
 static char rtspTargetUrl[256];
 static char* sessionIdString;
@@ -948,6 +953,8 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
     LC_ASSERT(RtspPortNumber != 0);
 
     // Initialize global state
+    pyrowaveDialect = PYROWAVE_DIALECT_NONE;
+    pyrowaveCompatibilityError[0] = 0;
     useEnet = (AppVersionQuad[0] >= 5) && (AppVersionQuad[0] <= 7) && (AppVersionQuad[2] < 404);
     currentSeqNumber = 1;
     hasSessionId = false;
@@ -1088,16 +1095,21 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
             goto Exit;
         }
 
-        int pyroFormat = 0;
-        if (IS_SUNSHINE() && strstr(response.payload, "a=x-ss-pyrowave.version:1\r\n")) {
-            pyroFormat = LiSelectPyroWaveFormat(StreamConfig.supportedVideoFormats,
-                                               serverInfo->serverCodecModeSupport, response.payload);
+        PYROWAVE_NEGOTIATION pyro = LiNegotiatePyroWave(StreamConfig.supportedVideoFormats,
+            serverInfo->serverCodecModeSupport, IS_SUNSHINE() ? response.payload : NULL);
+        int pyroFormat = pyro.format;
+        if (pyro.error) {
+            snprintf(pyrowaveCompatibilityError, sizeof(pyrowaveCompatibilityError), "%s", pyro.error);
+            Limelog("PyroWave negotiation rejected: %s\n", pyro.error);
         }
         if (pyroFormat) {
             NegotiatedVideoFormat = pyroFormat;
-            Limelog("Negotiated PyroWave (%s, %s)\n",
+            pyrowaveDialect = pyro.dialect;
+            Limelog("Negotiated PyroWave dialect=%s bitstream=%s (%s, %s) packetSize=%d\n",
+                    pyro.dialect == PYROWAVE_DIALECT_NATIVE_WIRE_V1 ? "native-wire-v1" : "record-framed",
+                    PYROWAVE_BITSTREAM_ID,
                     pyroFormat & VIDEO_FORMAT_PYROWAVE_444 ? "4:4:4" : "4:2:0",
-                    pyroFormat & VIDEO_FORMAT_PYROWAVE_HDR ? "HDR" : "SDR");
+                    pyroFormat & VIDEO_FORMAT_PYROWAVE_HDR ? "HDR10/10-bit" : "SDR/8-bit", StreamConfig.packetSize);
         }
         else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) &&
                  !(StreamConfig.supportedVideoFormats & (VIDEO_FORMAT_MASK_H264 | VIDEO_FORMAT_MASK_H265 | VIDEO_FORMAT_MASK_AV1))) {
@@ -1152,6 +1164,11 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
             if (StreamConfig.width > 4096 || StreamConfig.height > 4096) {
                 Limelog("WARNING: Host PC doesn't support HEVC. Streaming at resolutions above 4K using H.264 will likely fail!\n");
             }
+        }
+
+        if (!(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE)) {
+            // A permitted conventional fallback must not report a stale PyroWave error.
+            pyrowaveCompatibilityError[0] = 0;
         }
 
         // Look for the SDP attribute that indicates we're dealing with a server that supports RFI
@@ -1360,9 +1377,22 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
         }
 
         if (response.message.response.statusCode != 200) {
-            Limelog("RTSP ANNOUNCE request failed: %d\n",
-                response.message.response.statusCode);
+            if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+                if (response.payload && response.payloadLength > 0 &&
+                    response.payloadLength < (int)sizeof(pyrowaveCompatibilityError) &&
+                    !strncmp(response.payload, "PyroWave ANNOUNCE rejected:", strlen("PyroWave ANNOUNCE rejected:"))) {
+                    snprintf(pyrowaveCompatibilityError, sizeof(pyrowaveCompatibilityError), "%.*s",
+                             response.payloadLength, response.payload);
+                } else {
+                    snprintf(pyrowaveCompatibilityError, sizeof(pyrowaveCompatibilityError),
+                             "PyroWave ANNOUNCE rejected by host (RTSP %d); check host protocol/profile logs",
+                             response.message.response.statusCode);
+                }
+                Limelog("%s\n", pyrowaveCompatibilityError);
+            }
+            Limelog("RTSP ANNOUNCE request failed: %d\n", response.message.response.statusCode);
             ret = response.message.response.statusCode;
+            freeMessage(&response);
             goto Exit;
         }
 

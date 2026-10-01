@@ -11,6 +11,7 @@ typedef struct _RTPV_QUEUE_ENTRY {
     uint32_t rtpTimestamp;
     int length;
     bool isParity;
+    bool isLost;
 } RTPV_QUEUE_ENTRY, *PRTPV_QUEUE_ENTRY;
 
 typedef struct _RTPV_QUEUE_LIST {
@@ -37,6 +38,7 @@ typedef struct _RTP_VIDEO_QUEUE {
     uint32_t missingPackets; // # of holes behind receivedHighestSequenceNumber
     bool useFastQueuePath;
     bool reportedLostFrame;
+    uint64_t pendingFrameDeadlineUs;
 
     uint32_t currentFrameNumber;
 
@@ -58,3 +60,6 @@ void RtpvCleanupQueue(PRTP_VIDEO_QUEUE queue);
 int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_QUEUE_ENTRY packetEntry);
 uint32_t RtpvGetCurrentFrameNumber(PRTP_VIDEO_QUEUE queue);
 void RtpvSubmitQueuedPackets(PRTP_VIDEO_QUEUE queue);
+
+uint64_t RtpvGetPendingFrameDeadlineUs(PRTP_VIDEO_QUEUE queue);
+bool RtpvExpirePendingFrame(PRTP_VIDEO_QUEUE queue, uint64_t nowUs);

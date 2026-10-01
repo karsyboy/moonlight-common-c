@@ -140,6 +140,30 @@ int main(void) {
         if (hdr) assert(LiSelectPyroWaveFormat(f, modes & ~SCM_PYROWAVE_HDR, v1) == 0);
     }
     assert(LiSelectPyroWaveFormat(VIDEO_FORMAT_MASK_PYROWAVE, SCM_PYROWAVE, v1) == VIDEO_FORMAT_PYROWAVE);
+    const char *records = "a=rtpmap:99 PYROWAVE/90000\r\na=x-ss-pyrowave.bitstream:186f0393\r\na=x-ss-pyrowave.dialects:record-framed\r\n";
+    const char *both = "a=rtpmap:99 PYROWAVE/90000\r\na=x-ss-pyrowave.bitstream:186f0393\r\na=x-ss-pyrowave.version:1\r\na=x-ss-pyrowave.dialects:native-wire-v1 record-framed\r\n";
+    assert(LiNegotiatePyroWave(VIDEO_FORMAT_PYROWAVE, modes, both).dialect == PYROWAVE_DIALECT_NATIVE_WIRE_V1);
+    for (int hdr = 0; hdr <= 1; ++hdr) for (int c444 = 0; c444 <= 1; ++c444) {
+        const int f = (c444 ? VIDEO_FORMAT_PYROWAVE_444 : VIDEO_FORMAT_PYROWAVE) | (hdr ? VIDEO_FORMAT_PYROWAVE_HDR : 0);
+        PYROWAVE_NEGOTIATION n = LiNegotiatePyroWave(f, modes | SCM_PYROWAVE_RECORD_HDR444, records);
+        assert(n.dialect == PYROWAVE_DIALECT_RECORD_FRAMED && n.format == f);
+        PYROWAVE_VIDEO_PROFILE profile = LiPyroWaveProfile(n.format);
+        assert(profile.chroma444 == c444 && profile.hdr10 == hdr && profile.bitDepth == (hdr ? 10 : 8));
+        if (hdr && c444) assert(!LiSelectPyroWaveFormat(f, modes, records));
+    }
+    const char *invalid[] = {
+        "a=x-ss-pyrowave.version:1\na=x-ss-pyrowave.version:1\n",
+        "a=x-ss-pyrowave.version:\n",
+        "a=x-ss-pyrowave.version:1\na=x-ss-pyrowave.dialects:record-framed\n",
+        "a=rtpmap:99 PYROWAVE/90000-bogus\na=x-ss-pyrowave.bitstream:186f0393\n",
+        "a=rtpmap:99 PYROWAVE/90000\na=x-ss-pyrowave.bitstream:unknown\n",
+        "a=x-ss-pyrowave.version:1\na=x-ss-pyrowave.profiles:444-hdr10\n",
+    };
+    for (unsigned i = 0; i < sizeof(invalid)/sizeof(invalid[0]); ++i) {
+        PYROWAVE_NEGOTIATION n = LiNegotiatePyroWave(VIDEO_FORMAT_PYROWAVE, modes, invalid[i]);
+        assert(!n.format && n.error);
+    }
+    assert(LiSelectPyroWaveFormat(VIDEO_FORMAT_PYROWAVE, modes, "a=x-ss-pyrowave.version:1 \r\n") == VIDEO_FORMAT_PYROWAVE);
     assert(LiPyroWaveFrameBudget(200000, 60) == 416664);
     assert(LiPyroWaveFrameBudget(1000000, 120) == 1041664);
     assert(LiPyroWaveFrameBudget(2000000, 120) == 2083332);
