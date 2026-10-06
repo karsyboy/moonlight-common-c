@@ -818,6 +818,11 @@ int LiSendMultiControllerEvent(short controllerNumber, short activeGamepadMask,
 #define LI_CCAP_RGB_LED         0x80 // Can set RGB LED state via ConnListenerSetControllerLED()
 #define LI_CCAP_DUAL_TOUCHPAD  0x100 // Reports touchpad events from 2 separate touchpads
 #define LI_CCAP_DUALSENSE_EDGE 0x200 // Sony DualSense Edge subtype; keep LI_CTYPE_PS for older hosts
+// Optional model metadata in the existing arrival field. Never infer from buttons.
+#define LI_CCAP_XBOX_ELITE 0x400 // Xbox Elite; keep LI_CTYPE_XBOX
+#define LI_CCAP_STEAM_CONTROLLER 0x800 // Classic Steam Controller; keep LI_CTYPE_STEAM
+#define LI_CCAP_STEAM_DECK 0x1000 // Steam Deck built-in controller; keep LI_CTYPE_STEAM
+#define LI_CCAP_XBOX_ELITE_SERIES_2 0x2000 // Refines LI_CCAP_XBOX_ELITE to Series 2
 int LiSendControllerArrivalEvent(uint8_t controllerNumber, uint16_t activeGamepadMask, uint8_t type,
                                  uint32_t supportedButtonFlags, uint16_t capabilities);
 
