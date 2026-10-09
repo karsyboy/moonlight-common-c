@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "AudioQuality.h"
 #include "PyroWave.h"
 #include "Rtsp.h"
 
@@ -960,6 +961,7 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
     hasSessionId = false;
     controlStreamId = APP_VERSION_AT_LEAST(7, 1, 431) ? "streamid=control/13/0" : "streamid=control/1/0";
     AudioEncryptionEnabled = false;
+    HostAudioQualityLevel = -1;
     encryptedRtspEnabled = serverInfo->rtspSessionUrl && strstr(serverInfo->rtspSessionUrl, "rtspenc://");
     encryptionCtx = PltCreateCryptoContext();
     decryptionCtx = PltCreateCryptoContext();
@@ -1190,6 +1192,9 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
             EncryptionFeaturesRequested = 0;
         }
         EncryptionFeaturesEnabled = 0;
+
+        // Pyroshine accepts a requested audio quality level in ANNOUNCE.
+        HostAudioQualityLevel = IS_SUNSHINE() ? LiHostAudioQualityLevel(response.payload) : -1;
 
         // Parse the Opus surround parameters out of the RTSP DESCRIBE response.
         ret = parseOpusConfigurations(&response);

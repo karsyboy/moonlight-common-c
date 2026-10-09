@@ -2,6 +2,7 @@
 #pragma once
 
 #include "Limelight.h"
+#include "SdpAttribute.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -43,29 +44,6 @@ typedef struct _PYROWAVE_NEGOTIATION {
     const char* error;
 } PYROWAVE_NEGOTIATION;
 
-// Match complete SDP lines; duplicate/conflicting attributes are rejected.
-static inline int LiPyroWaveSdpValue(const char* sdp, const char* key, char* out, size_t capacity) {
-    int found = 0;
-    size_t klen = strlen(key);
-    for (const char* line = sdp; line && *line;) {
-        const char* end = strchr(line, '\n');
-        size_t length = end ? (size_t)(end - line) : strlen(line);
-        if (length && line[length - 1] == '\r') --length;
-        if (length >= klen + 3 && !memcmp(line, "a=", 2) &&
-            !memcmp(line + 2, key, klen) && line[2 + klen] == ':') {
-            const char* value = line + klen + 3;
-            size_t valueLength = length - klen - 3;
-            while (valueLength && (*value == ' ' || *value == '\t')) { ++value; --valueLength; }
-            while (valueLength && (value[valueLength-1] == ' ' || value[valueLength-1] == '\t')) --valueLength;
-            if (!valueLength) return -1;
-            if (++found > 1 || valueLength >= capacity) return -1;
-            memcpy(out, value, valueLength); out[valueLength] = 0;
-        }
-        line = end ? end + 1 : NULL;
-    }
-    return found;
-}
-
 // Space-separated setup capability tokens, never substring guesses.
 static inline int LiPyroWaveHasToken(const char* list, const char* token) {
     size_t length = strlen(token);
@@ -106,10 +84,10 @@ static inline PYROWAVE_NEGOTIATION LiNegotiatePyroWave(int formats, int modes, c
     PYROWAVE_NEGOTIATION n = {PYROWAVE_DIALECT_NONE, 0, NULL};
     if (!(formats & VIDEO_FORMAT_MASK_PYROWAVE) || !sdp) return n;
     char version[32] = {0}, bitstream[32] = {0}, dialects[96] = {0}, profiles[128] = {0};
-    int v = LiPyroWaveSdpValue(sdp, "x-ss-pyrowave.version", version, sizeof(version));
-    int b = LiPyroWaveSdpValue(sdp, "x-ss-pyrowave.bitstream", bitstream, sizeof(bitstream));
-    int d = LiPyroWaveSdpValue(sdp, "x-ss-pyrowave.dialects", dialects, sizeof(dialects));
-    int p = LiPyroWaveSdpValue(sdp, "x-ss-pyrowave.profiles", profiles, sizeof(profiles));
+    int v = LiSdpAttributeValue(sdp, "x-ss-pyrowave.version", version, sizeof(version));
+    int b = LiSdpAttributeValue(sdp, "x-ss-pyrowave.bitstream", bitstream, sizeof(bitstream));
+    int d = LiSdpAttributeValue(sdp, "x-ss-pyrowave.dialects", dialects, sizeof(dialects));
+    int p = LiSdpAttributeValue(sdp, "x-ss-pyrowave.profiles", profiles, sizeof(profiles));
     if (v < 0 || b < 0 || d < 0 || p < 0) { n.error = "Duplicate or oversized PyroWave capability attribute"; return n; }
     if (b && strcmp(bitstream, PYROWAVE_BITSTREAM_ID)) {
         n.error = "PyroWave bitstream revision incompatible (client requires 186f0393)"; return n;

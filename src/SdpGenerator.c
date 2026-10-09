@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "AudioQuality.h"
 #include "PyroWave.h"
 #include <inttypes.h>
 
@@ -259,6 +260,7 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
     char payloadStr[92];
     int audioChannelCount;
     int audioChannelMask;
+    int audioQualityLevel;
     int err;
     int adjustedBitrate;
 
@@ -505,7 +507,10 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
     }
 
     if (AppVersionQuad[0] >= 7) {
-        if (StreamConfig.bitrate >= HIGH_AUDIO_BITRATE_THRESHOLD && audioChannelCount > 2 &&
+        // A client asking for High or Maximum audio quality wants high-quality
+        // surround at any video bitrate.
+        if ((StreamConfig.bitrate >= HIGH_AUDIO_BITRATE_THRESHOLD || StreamConfig.audioQuality >= AUDIO_QUALITY_HIGH) &&
+                audioChannelCount > 2 &&
                 HighQualitySurroundSupported && (AudioCallbacks.capabilities & CAPABILITY_SLOW_OPUS_DECODER) == 0) {
             // Enable high quality mode for surround sound
             err |= addAttributeString(&optionHead, "x-nv-audio.surround.AudioQuality", "1");
@@ -535,6 +540,14 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
 
         snprintf(payloadStr, sizeof(payloadStr), "%d", AudioPacketDuration);
         err |= addAttributeString(&optionHead, "x-nv-aqos.packetDuration", payloadStr);
+
+        // Opus bitrate level on Pyroshine hosts; the stream layout is unchanged.
+        audioQualityLevel = LiAudioQualityRequest(StreamConfig.audioQuality, HostAudioQualityLevel);
+        if (audioQualityLevel >= 0) {
+            snprintf(payloadStr, sizeof(payloadStr), "%d", audioQualityLevel);
+            err |= addAttributeString(&optionHead, HOST_AUDIO_QUALITY_ATTRIBUTE, payloadStr);
+            Limelog("Requesting audio quality level %d\n", audioQualityLevel);
+        }
     }
     else {
         // 5 ms duration for legacy servers

@@ -100,7 +100,20 @@ typedef struct _STREAM_CONFIGURATION {
     // in /launch and /resume requests.
     char remoteInputAesKey[16];
     char remoteInputAesIv[16];
+
+    // Private Pyroshine extension: the audio quality to request, one of the
+    // AUDIO_QUALITY_* values below. The default (0, as set by
+    // LiInitializeStreamConfiguration) requests nothing and keeps upstream
+    // behavior. Pyroshine hosts raise the Opus bitrate for the requested level;
+    // other hosts ignore it. AUDIO_QUALITY_HIGH and above also request
+    // GameStream high-quality surround from any host at any video bitrate.
+    int audioQuality;
 } STREAM_CONFIGURATION, *PSTREAM_CONFIGURATION;
+
+#define AUDIO_QUALITY_HOST_DEFAULT 0
+#define AUDIO_QUALITY_STANDARD     1
+#define AUDIO_QUALITY_HIGH         2
+#define AUDIO_QUALITY_MAXIMUM      3
 
 // Use this function to zero the stream configuration when allocated on the stack or heap
 void LiInitializeStreamConfiguration(PSTREAM_CONFIGURATION streamConfig);

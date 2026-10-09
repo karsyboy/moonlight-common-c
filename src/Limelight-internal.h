@@ -31,6 +31,8 @@ extern OPUS_MULTISTREAM_CONFIGURATION NormalQualityOpusConfig;
 extern OPUS_MULTISTREAM_CONFIGURATION HighQualityOpusConfig;
 extern int AudioPacketDuration;
 extern bool AudioEncryptionEnabled;
+// Highest x-moonshine-audio.quality level the host accepts, or -1.
+extern int HostAudioQualityLevel;
 extern bool ReferenceFrameInvalidationSupported;
 
 extern uint16_t RtspPortNumber;
