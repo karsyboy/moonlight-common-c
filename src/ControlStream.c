@@ -413,7 +413,11 @@ static void queueFrameInvalidationTuple(uint32_t startFrame, uint32_t endFrame) 
 
 // Request an IDR frame on demand by the decoder
 void LiRequestIdrFrame(void) {
-    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) return;
+    // Explicit decoder/renderer refresh requests also apply to intra-only
+    // PyroWave. A frame received while the decoder is being created/reset may
+    // have been discarded, and a static desktop may not send another one.
+    // The host answers with an independent replay; ordinary PyroWave packet
+    // loss still bypasses reference recovery in connectionDetectedFrameLoss().
     // Any reference frame invalidation requests should be dropped now.
     // We require a full IDR frame to recover.
     freeBasicLbqList(LbqFlushQueueItems(&referenceFrameControlQueue));

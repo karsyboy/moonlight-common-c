@@ -7,6 +7,11 @@ Unknown, empty, duplicate and contradictory capabilities are rejected. The
 selected dialect resets on each RTSP handshake. Conventional codecs retain
 their existing negotiation and receive behavior.
 
+Explicit renderer/decoder refresh requests use the normal IDR request message
+for PyroWave too: the host replays an independent frame. This is needed when a
+frame arrived during renderer creation or reset on a static desktop. Ordinary
+PyroWave packet loss still requires no reference-frame invalidation.
+
 Native wire-v1 has one path: opaque contiguous codec bytes, ordinary RTP/NV
 packetization, existing multi-block FEC/encryption, complete reassembly and
 native decode. Packet payload contents never choose a framing mode. Native
