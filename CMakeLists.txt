@@ -147,6 +147,17 @@ if(CONTROLLER_PROTOCOL_TESTS)
   add_executable(controller-protocol-test tests/controller_protocol.c)
   target_include_directories(controller-protocol-test PRIVATE src enet/include)
   add_test(NAME controller-protocol COMMAND controller-protocol-test)
+
+  # Includes InputStream.c; the library supplies everything else.
+  add_executable(controller-lifetime-test tests/controller_lifetime.c)
+  target_include_directories(controller-lifetime-test PRIVATE src enet/include)
+  target_compile_definitions(controller-lifetime-test PRIVATE HAS_SOCKLEN_T)
+  target_link_libraries(controller-lifetime-test PRIVATE moonlight-common-c)
+  if(NOT MSVC)
+    target_compile_options(controller-lifetime-test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(controller-lifetime-test PRIVATE -fsanitize=address,undefined)
+  endif()
+  add_test(NAME controller-lifetime COMMAND controller-lifetime-test)
 endif()
 
 if(PYROWAVE_PROTOCOL_TESTS)
