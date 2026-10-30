@@ -108,6 +108,13 @@ typedef struct _STREAM_CONFIGURATION {
     // other hosts ignore it. AUDIO_QUALITY_HIGH and above also request
     // GameStream high-quality surround from any host at any video bitrate.
     int audioQuality;
+
+    // Set up the host's microphone stream (Apollo's microphone passthrough,
+    // which Pyroshine, Rubylight and Apollo hosts offer) so the client can send
+    // its microphone with LiSendMicrophoneOpusData(). The stream is used only
+    // when the host offers it with encryption; the rest of the stream does not
+    // depend on it.
+    bool enableMic;
 } STREAM_CONFIGURATION, *PSTREAM_CONFIGURATION;
 
 #define AUDIO_QUALITY_HOST_DEFAULT 0
@@ -1065,6 +1072,16 @@ void LiRequestIdrFrame(void);
 #define LI_FF_PEN_TOUCH_EVENTS        0x01 // LiSendTouchEvent()/LiSendPenEvent() supported
 #define LI_FF_CONTROLLER_TOUCH_EVENTS 0x02 // LiSendControllerTouchEvent() supported
 uint32_t LiGetHostFeatureFlags(void);
+
+// Whether the microphone stream (STREAM_CONFIGURATION::enableMic) was set up
+// with the host for this connection and LiSendMicrophoneOpusData() can send.
+bool LiIsMicrophoneStreamActive(void);
+
+// Sends one mono 48 kHz Opus packet (at most 1356 bytes) to the host's
+// microphone, encrypted. Call it for each packet as it is encoded; to mute,
+// stop calling it. Returns the bytes sent, or a negative value when the
+// stream is not active or the send failed. May be called from any thread.
+int LiSendMicrophoneOpusData(const unsigned char* opusData, int opusLength);
 
 #ifdef __cplusplus
 }

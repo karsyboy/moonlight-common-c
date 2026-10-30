@@ -303,6 +303,11 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
             EncryptionFeaturesEnabled |= SS_ENC_AUDIO;
         }
 
+        // A microphone that was set up is always encrypted (hosts never take it in the clear)
+        if (MicPortNumber != 0 && (EncryptionFeaturesSupported & SS_ENC_MICROPHONE)) {
+            EncryptionFeaturesEnabled |= SS_ENC_MICROPHONE;
+        }
+
         snprintf(payloadStr, sizeof(payloadStr), "%" PRIu32, EncryptionFeaturesEnabled);
         err |= addAttributeString(&optionHead, "x-ss-general.encryptionEnabled", payloadStr);
 

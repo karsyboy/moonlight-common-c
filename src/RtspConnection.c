@@ -950,6 +950,9 @@ bool parseSdpAttributeToInt(const char* payload, const char* name, int* val) {
 // Perform RTSP Handshake with the streaming server machine as part of the connection process
 int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
     int ret;
+    // The microphone port the host offers, 0 when it names none, -1 when the
+    // microphone will not be set up.
+    int hostMicPort = -1;
 
     LC_ASSERT(RtspPortNumber != 0);
 
@@ -1193,6 +1196,18 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
         }
         EncryptionFeaturesEnabled = 0;
 
+        if (StreamConfig.enableMic) {
+            hostMicPort = LiHostMicrophonePort(response.payload);
+            if (hostMicPort < 0) {
+                Limelog("The host does not offer a microphone stream\n");
+            }
+            else if (!(EncryptionFeaturesSupported & SS_ENC_MICROPHONE)) {
+                // Hosts take the microphone only encrypted; never send it in the clear.
+                Limelog("The host does not offer microphone encryption; not sending the microphone\n");
+                hostMicPort = -1;
+            }
+        }
+
         // Pyroshine accepts a requested audio quality level in ANNOUNCE.
         HostAudioQualityLevel = IS_SUNSHINE() ? LiHostAudioQualityLevel(response.payload) : -1;
 
@@ -1371,6 +1386,33 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
         freeMessage(&response);
     }
 
+    // The microphone is set up after the other streams and before ANNOUNCE.
+    // A host that refuses it costs only the microphone.
+    if (hostMicPort >= 0) {
+        RTSP_MESSAGE response;
+        int error = -1;
+
+        if (!setupStream(&response,
+                         AppVersionQuad[0] >= 5 ? "streamid=mic/0/0" : "streamid=mic",
+                         &error)) {
+            Limelog("RTSP SETUP streamid=mic request failed: %d; continuing without the microphone\n", error);
+        }
+        else {
+            if (response.message.response.statusCode != 200) {
+                Limelog("RTSP SETUP streamid=mic failed: %d; continuing without the microphone\n",
+                    response.message.response.statusCode);
+            }
+            else {
+                LC_ASSERT(MicPortNumber == 0);
+                if (!parseServerPortFromTransport(&response, &MicPortNumber)) {
+                    MicPortNumber = hostMicPort > 0 ? (uint16_t)hostMicPort : DEFAULT_MIC_PORT;
+                }
+                Limelog("Microphone port: %u\n", MicPortNumber);
+            }
+            freeMessage(&response);
+        }
+    }
+
     {
         RTSP_MESSAGE response;
         int error = -1;
@@ -1463,6 +1505,24 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
             }
 
             freeMessage(&response);
+        }
+
+        if (MicPortNumber != 0) {
+            RTSP_MESSAGE response;
+            int error = -1;
+
+            if (!playStream(&response, "streamid=mic", &error)) {
+                Limelog("RTSP PLAY streamid=mic request failed: %d; continuing without the microphone\n", error);
+                MicPortNumber = 0;
+            }
+            else {
+                if (response.message.response.statusCode != 200) {
+                    Limelog("RTSP PLAY streamid=mic failed: %d; continuing without the microphone\n",
+                        response.message.response.statusCode);
+                    MicPortNumber = 0;
+                }
+                freeMessage(&response);
+            }
         }
     }
 

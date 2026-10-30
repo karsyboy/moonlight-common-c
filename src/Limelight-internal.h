@@ -39,6 +39,8 @@ extern uint16_t RtspPortNumber;
 extern uint16_t ControlPortNumber;
 extern uint16_t AudioPortNumber;
 extern uint16_t VideoPortNumber;
+// The host's microphone port after SETUP streamid=mic; 0 without a microphone.
+extern uint16_t MicPortNumber;
 
 extern SS_PING AudioPingPayload;
 extern SS_PING VideoPingPayload;
@@ -50,6 +52,8 @@ extern uint32_t SunshineFeatureFlags;
 #define SS_ENC_CONTROL_V2 0x01
 #define SS_ENC_VIDEO 0x02
 #define SS_ENC_AUDIO 0x04
+// Apollo's microphone stream, which hosts take only encrypted
+#define SS_ENC_MICROPHONE 0x08
 
 extern uint32_t EncryptionFeaturesSupported;
 extern uint32_t EncryptionFeaturesRequested;
@@ -141,6 +145,22 @@ void destroyVideoStream(void);
 void notifyKeyFrameReceived(void);
 int startVideoStream(void* rendererContext, int drFlags);
 void stopVideoStream(void);
+
+#define MIC_PACKET_MAGIC 0x12345678
+#define MIC_PACKET_TYPE_OPUS 0x61
+#define MAX_MIC_PACKET_SIZE 1400
+// Hosts that set up a microphone without naming its port use this one.
+#define DEFAULT_MIC_PORT 48001
+// The port the host offers a microphone on in its DESCRIBE response: 0 when it
+// names none, -1 when it offers no microphone.
+int LiHostMicrophonePort(const char* describePayload);
+// One encrypted microphone datagram in `packet`; returns its length or -1.
+int buildMicrophonePacket(PPLT_CRYPTO_CONTEXT ctx, const unsigned char* key, uint32_t riKeyId,
+                          uint16_t sequenceNumber, uint32_t timestampMs,
+                          const unsigned char* opusData, int opusLength,
+                          unsigned char* packet, int packetCapacity);
+int initializeMicrophoneStream(void);
+void destroyMicrophoneStream(void);
 
 int initializeAudioStream(void);
 int notifyAudioPortNegotiationComplete(void);

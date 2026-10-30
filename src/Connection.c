@@ -28,6 +28,7 @@ int HostAudioQualityLevel;
 bool ReferenceFrameInvalidationSupported;
 uint16_t RtspPortNumber;
 uint16_t ControlPortNumber;
+uint16_t MicPortNumber;
 uint16_t AudioPortNumber;
 uint16_t VideoPortNumber;
 SS_PING AudioPingPayload;
@@ -73,6 +74,10 @@ void LiStopConnection(void) {
 
     // Set the interrupted flag
     LiInterruptConnection();
+
+    // The microphone is not a connection stage: it starts last, when the host
+    // set it up, and its failure costs only the microphone.
+    destroyMicrophoneStream();
 
     if (stage == STAGE_INPUT_STREAM_START) {
         Limelog("Stopping input stream...");
@@ -268,6 +273,7 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
     VideoPortNumber = 0;
     ControlPortNumber = 0;
     AudioPortNumber = 0;
+    MicPortNumber = 0;
 
     // Parse RTSP port number from RTSP session URL
     if (!parseRtspPortNumberFromUrl(serverInfo->rtspSessionUrl, &RtspPortNumber)) {
@@ -531,6 +537,18 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
     LC_ASSERT(stage == STAGE_INPUT_STREAM_START);
     ListenerCallbacks.stageComplete(STAGE_INPUT_STREAM_START);
     Limelog("done\n");
+
+    if (MicPortNumber != 0 && (EncryptionFeaturesEnabled & SS_ENC_MICROPHONE)) {
+        Limelog("Starting microphone stream...");
+        err = initializeMicrophoneStream();
+        if (err != 0) {
+            Limelog("failed: %d (the microphone is unavailable)\n", err);
+            err = 0;
+        }
+        else {
+            Limelog("done\n");
+        }
+    }
     
     // Wiggle the mouse a bit to wake the display up
     LiSendMouseMoveEvent(1, 1);
