@@ -14,7 +14,20 @@ PyroWave packet loss still requires no reference-frame invalidation.
 
 Native wire-v1 has one path: opaque contiguous codec bytes, ordinary RTP/NV
 packetization, existing multi-block FEC/encryption, complete reassembly and
-native decode. Packet payload contents never choose a framing mode. Native
+native decode.
+
+GameStream's NV header has two bits each for the current (bits 4–5) and last
+(bits 6–7) FEC block index of `multiFecBlocks`: four blocks of at most 255
+shards, so large PyroWave frames lose most of their parity. When DESCRIBE offers
+`x-ss-pyrowave.fecBlocks:16`, the client echoes it in ANNOUNCE, for either
+dialect, and both sides use the extended layout: bits 0–1 and 2–3 carry the
+high two bits of each index, for up to sixteen blocks (`Video.h`). Any other
+offered value keeps four blocks; the layout is never inferred from packets.
+Frames of up to four blocks are byte-identical in both layouts. The RTP queue,
+Reed-Solomon recovery (which rewrites recovered headers with the same
+encoding) and the depacketizer read the negotiated layout, which resets on each
+RTSP handshake. Recovered and unrecoverable data packets are counted in
+`RTP_VIDEO_STATS` (`packetCountFecRecovered`, `packetCountFecFailed`). Packet payload contents never choose a framing mode. Native
 frames cannot be partially delivered, even when record-like metadata is present.
 
 Record mode announces features bit 1 and its explicit dialect/family. NV
@@ -41,4 +54,8 @@ Configure CMake with `PYROWAVE_PROTOCOL_TESTS=ON` and
 `CONTROLLER_PROTOCOL_TESTS=ON`, then run CTest. Fixtures cover native preference,
 record profiles, invalid/duplicate/revision capabilities, complete opaque frame
 preservation, large packet counts, loss, reordering, expiry, wrap and native
-isolation. Client tests validate real codec golden frames and record parsing.
+isolation. `pyrowave-extended-fec` feeds a five-block frame packetized by
+Pyroshine (`tests/fixtures/pyrowave-extended-fec.bin`, the same bytes its
+packetizer test checks) through the queue, Reed-Solomon recovery and
+depacketizer with scattered, burst, reordered and excessive loss. Client tests
+validate real codec golden frames and record parsing.

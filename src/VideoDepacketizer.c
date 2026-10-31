@@ -26,6 +26,8 @@ static uint32_t firstPacketRtpTimestamp;
 static bool dropStatePending;
 static bool idrFrameProcessed;
 static uint16_t pyrowaveCriticalPackets;
+// Negotiated PyroWave extended FEC block layout (see Video.h).
+static bool extendedFecBlocks;
 
 #define DR_CLEANUP -1000
 
@@ -80,6 +82,7 @@ void initializeVideoDepacketizer(int pktSize) {
     dropStatePending = false;
     idrFrameProcessed = false;
     pyrowaveCriticalPackets = 0;
+    extendedFecBlocks = NegotiatedPyroWaveExtendedFecBlocks;
     strictIdrFrameWait = !isReferenceFrameInvalidationEnabled();
 }
 
@@ -776,8 +779,8 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
     currentPos.offset = 0;
     currentPos.length = length - sizeof(*videoPacket);
 
-    fecCurrentBlockNumber = (videoPacket->multiFecBlocks >> 4) & 0x3;
-    fecLastBlockNumber = (videoPacket->multiFecBlocks >> 6) & 0x3;
+    fecCurrentBlockNumber = LiFecBlockIndex(videoPacket->multiFecBlocks, extendedFecBlocks);
+    fecLastBlockNumber = LiFecLastBlockIndex(videoPacket->multiFecBlocks, extendedFecBlocks);
     frameIndex = videoPacket->frameIndex;
     flags = videoPacket->flags;
     extraFlags = videoPacket->extraFlags;

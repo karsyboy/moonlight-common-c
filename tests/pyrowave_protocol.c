@@ -143,6 +143,19 @@ int main(void) {
     const char *records = "a=rtpmap:99 PYROWAVE/90000\r\na=x-ss-pyrowave.bitstream:186f0393\r\na=x-ss-pyrowave.dialects:record-framed\r\n";
     const char *both = "a=rtpmap:99 PYROWAVE/90000\r\na=x-ss-pyrowave.bitstream:186f0393\r\na=x-ss-pyrowave.version:1\r\na=x-ss-pyrowave.dialects:native-wire-v1 record-framed\r\n";
     assert(LiNegotiatePyroWave(VIDEO_FORMAT_PYROWAVE, modes, both).dialect == PYROWAVE_DIALECT_NATIVE_WIRE_V1);
+    // The extended FEC block layout is used only when the host offers exactly it.
+    {
+        char sdp[512];
+        snprintf(sdp, sizeof(sdp), "%sa=x-ss-pyrowave.fecBlocks:16\r\n", both);
+        PYROWAVE_NEGOTIATION n = LiNegotiatePyroWave(VIDEO_FORMAT_PYROWAVE, modes, sdp);
+        assert(n.format && n.extendedFecBlocks && !n.error);
+        assert(!LiNegotiatePyroWave(VIDEO_FORMAT_PYROWAVE, modes, both).extendedFecBlocks);
+        snprintf(sdp, sizeof(sdp), "%sa=x-ss-pyrowave.fecBlocks:32\r\n", both);
+        n = LiNegotiatePyroWave(VIDEO_FORMAT_PYROWAVE, modes, sdp);
+        assert(n.format && !n.extendedFecBlocks && !n.error); // A newer host's layout: keep four blocks.
+        snprintf(sdp, sizeof(sdp), "%sa=x-ss-pyrowave.fecBlocks:16\r\na=x-ss-pyrowave.fecBlocks:16\r\n", both);
+        assert(LiNegotiatePyroWave(VIDEO_FORMAT_PYROWAVE, modes, sdp).error);
+    }
     for (int hdr = 0; hdr <= 1; ++hdr) for (int c444 = 0; c444 <= 1; ++c444) {
         const int f = (c444 ? VIDEO_FORMAT_PYROWAVE_444 : VIDEO_FORMAT_PYROWAVE) | (hdr ? VIDEO_FORMAT_PYROWAVE_HDR : 0);
         PYROWAVE_NEGOTIATION n = LiNegotiatePyroWave(f, modes | SCM_PYROWAVE_RECORD_HDR444, records);
@@ -195,11 +208,19 @@ int main(void) {
         snprintf(expected, sizeof(expected), "a=x-nv-vqos[0].bitStreamFormat:%u \r\n", i < 3 ? i : 3);
         assert(strstr(payload, expected));
         assert(!!strstr(payload, "a=x-ss-pyrowave.version:1 \r\n") == (i >= 3));
+        assert(!strstr(payload, "x-ss-pyrowave.fecBlocks"));
         if (i == 4) {
             assert(strstr(payload, "a=x-ss-video[0].chromaSamplingType:1 \r\n"));
             assert(strstr(payload, "a=x-nv-video[0].dynamicRangeMode:1 \r\n"));
         }
         free(payload);
+        // Echoed only when this handshake negotiated it, and only with PyroWave.
+        NegotiatedPyroWaveExtendedFecBlocks = true;
+        payload = getSdpPayloadForStreamConfig(14, &length);
+        assert(payload);
+        assert(!!strstr(payload, "a=x-ss-pyrowave.fecBlocks:16 \r\n") == (i >= 3));
+        free(payload);
+        NegotiatedPyroWaveExtendedFecBlocks = false;
     }
     test_reassembly();
     test_large_packet_count_reassembly();

@@ -24,6 +24,9 @@ extern CONNECTION_LISTENER_CALLBACKS ListenerCallbacks;
 extern DECODER_RENDERER_CALLBACKS VideoCallbacks;
 extern AUDIO_RENDERER_CALLBACKS AudioCallbacks;
 extern int NegotiatedVideoFormat;
+// The PyroWave extended FEC block layout (up to 16 blocks, see Video.h), set by
+// the RTSP handshake when the host offered it; we echo it in ANNOUNCE.
+extern bool NegotiatedPyroWaveExtendedFecBlocks;
 extern volatile bool ConnectionInterrupted;
 extern bool HighQualitySurroundSupported;
 extern bool HighQualitySurroundEnabled;

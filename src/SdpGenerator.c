@@ -451,6 +451,10 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
                 err |= addAttributeString(&optionHead, "x-ss-pyrowave.version", "1");
                 err |= addAttributeString(&optionHead, "x-ss-pyrowave.dialect", "native-wire-v1");
             }
+            if (NegotiatedPyroWaveExtendedFecBlocks) {
+                // Only an echoed layout is used: the host keeps four blocks otherwise.
+                err |= addAttributeString(&optionHead, PYROWAVE_FEC_BLOCKS_ATTRIBUTE, PYROWAVE_EXTENDED_FEC_BLOCKS_VALUE);
+            }
         }
         else if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_AV1) {
             err |= addAttributeString(&optionHead, "x-nv-vqos[0].bitStreamFormat", "2");

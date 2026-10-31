@@ -958,6 +958,7 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
 
     // Initialize global state
     pyrowaveDialect = PYROWAVE_DIALECT_NONE;
+    NegotiatedPyroWaveExtendedFecBlocks = false;
     pyrowaveCompatibilityError[0] = 0;
     useEnet = (AppVersionQuad[0] >= 5) && (AppVersionQuad[0] <= 7) && (AppVersionQuad[2] < 404);
     currentSeqNumber = 1;
@@ -1110,11 +1111,13 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
         if (pyroFormat) {
             NegotiatedVideoFormat = pyroFormat;
             pyrowaveDialect = pyro.dialect;
-            Limelog("Negotiated PyroWave dialect=%s bitstream=%s (%s, %s) packetSize=%d\n",
+            NegotiatedPyroWaveExtendedFecBlocks = pyro.extendedFecBlocks;
+            Limelog("Negotiated PyroWave dialect=%s bitstream=%s (%s, %s) packetSize=%d fecBlocks=%d\n",
                     pyro.dialect == PYROWAVE_DIALECT_NATIVE_WIRE_V1 ? "native-wire-v1" : "record-framed",
                     PYROWAVE_BITSTREAM_ID,
                     pyroFormat & VIDEO_FORMAT_PYROWAVE_444 ? "4:4:4" : "4:2:0",
-                    pyroFormat & VIDEO_FORMAT_PYROWAVE_HDR ? "HDR10/10-bit" : "SDR/8-bit", StreamConfig.packetSize);
+                    pyroFormat & VIDEO_FORMAT_PYROWAVE_HDR ? "HDR10/10-bit" : "SDR/8-bit", StreamConfig.packetSize,
+                    NegotiatedPyroWaveExtendedFecBlocks ? PYROWAVE_EXTENDED_FEC_BLOCKS : 4);
         }
         else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) &&
                  !(StreamConfig.supportedVideoFormats & (VIDEO_FORMAT_MASK_H264 | VIDEO_FORMAT_MASK_H265 | VIDEO_FORMAT_MASK_AV1))) {

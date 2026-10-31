@@ -43,6 +43,8 @@ typedef struct _RTP_VIDEO_QUEUE {
     uint32_t currentFrameNumber;
 
     bool multiFecCapable;
+    // PyroWave extended layout: up to 16 FEC blocks per frame (see Video.h).
+    bool extendedFecBlocks;
     uint8_t multiFecCurrentBlockNumber;
     uint8_t multiFecLastBlockNumber;
 

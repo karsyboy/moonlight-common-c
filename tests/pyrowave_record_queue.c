@@ -23,6 +23,7 @@ int AppVersionQuad[4] = {7, 1, 431, -1};
 STREAM_CONFIGURATION StreamConfig = {0};
 CONNECTION_LISTENER_CALLBACKS ListenerCallbacks = {0};
 int NegotiatedVideoFormat = PYROWAVE_FORMAT;
+bool NegotiatedPyroWaveExtendedFecBlocks;
 
 static uint64_t fakeNowUs = 1000000;
 static int failures;

@@ -23,6 +23,7 @@ void RtpvInitializeQueue(PRTP_VIDEO_QUEUE queue) {
 
     queue->currentFrameNumber = 1;
     queue->multiFecCapable = APP_VERSION_AT_LEAST(7, 1, 431);
+    queue->extendedFecBlocks = NegotiatedPyroWaveExtendedFecBlocks;
 }
 
 static void purgeListEntries(PRTPV_QUEUE_LIST list) {
@@ -345,6 +346,8 @@ static int reconstructFrame(PRTP_VIDEO_QUEUE queue) {
                 queue->currentFrameNumber);
 #endif
 
+        queue->stats.packetCountFecRecovered += queue->bufferDataPackets - queue->receivedDataPackets;
+
         // Report the final FEC status if we needed to perform a recovery
         reportFinalFrameFecStatus(queue);
     }
@@ -368,8 +371,9 @@ cleanup_packets:
 
                 PNV_VIDEO_PACKET nvPacket = (PNV_VIDEO_PACKET)(((char*)rtpPacket) + dataOffset);
                 nvPacket->frameIndex = queue->currentFrameNumber;
-                nvPacket->multiFecBlocks =
-                        ((queue->multiFecLastBlockNumber << 2) | queue->multiFecCurrentBlockNumber) << 4;
+                nvPacket->multiFecBlocks = LiFecBlocksByte(queue->multiFecCurrentBlockNumber,
+                                                           queue->multiFecLastBlockNumber,
+                                                           queue->extendedFecBlocks);
                 // TODO: nvPacket->multiFecFlags?
 
 #ifdef FEC_VALIDATION_MODE
@@ -792,7 +796,7 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
 #endif
 
     uint32_t fecIndex = (nvPacket->fecInfo & 0x3FF000) >> 12;
-    uint8_t fecCurrentBlockNumber = (nvPacket->multiFecBlocks >> 4) & 0x3;
+    uint8_t fecCurrentBlockNumber = LiFecBlockIndex(nvPacket->multiFecBlocks, queue->extendedFecBlocks);
 
     if (nvPacket->frameIndex == queue->currentFrameNumber && fecCurrentBlockNumber < queue->multiFecCurrentBlockNumber) {
         // Reject FEC blocks behind our current block number
@@ -807,6 +811,7 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
         if (queue->pendingFecBlockList.count != 0) {
             // Report the final status of the FEC queue before dropping this frame
             reportFinalFrameFecStatus(queue);
+            queue->stats.packetCountFecFailed += queue->bufferDataPackets - queue->receivedDataPackets;
 
             // PyroWave: once the next block of this frame or the next frame starts, the
             // incomplete block is delivered with its missing packets zero-filled. That
@@ -942,7 +947,7 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
         queue->bufferFirstParitySequenceNumber = U16(queue->bufferLowestSequenceNumber + queue->bufferDataPackets);
         queue->bufferHighestSequenceNumber = U16(queue->bufferFirstParitySequenceNumber + queue->bufferParityPackets - 1);
         queue->multiFecCurrentBlockNumber = fecCurrentBlockNumber;
-        queue->multiFecLastBlockNumber = (nvPacket->multiFecBlocks >> 6) & 0x3;
+        queue->multiFecLastBlockNumber = LiFecLastBlockIndex(nvPacket->multiFecBlocks, queue->extendedFecBlocks);
 
         queue->stats.packetCountVideo += queue->bufferDataPackets;
         queue->stats.packetCountFec += queue->bufferParityPackets;
@@ -963,7 +968,7 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
 
     // Multi-block FEC details must remain the same within a single frame
     LC_ASSERT_VT(fecCurrentBlockNumber == queue->multiFecCurrentBlockNumber);
-    LC_ASSERT_VT(((nvPacket->multiFecBlocks >> 6) & 0x3) == queue->multiFecLastBlockNumber);
+    LC_ASSERT_VT(LiFecLastBlockIndex(nvPacket->multiFecBlocks, queue->extendedFecBlocks) == queue->multiFecLastBlockNumber);
 
     LC_ASSERT_VT((nvPacket->flags & FLAG_EOF) || length - dataOffset == StreamConfig.packetSize);
     if (!queuePacket(queue, packetEntry, packet, length, !isBefore16(packet->sequenceNumber, queue->bufferFirstParitySequenceNumber), false)) {

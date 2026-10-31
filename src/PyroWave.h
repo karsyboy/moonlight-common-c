@@ -36,11 +36,16 @@ static inline PYROWAVE_RECEIVE_LIMIT_STATUS LiPyroWaveReceiveLimitStatus(int64_t
 // The block format was checked in both directions against Nonary's vendored
 // 186f0393 codec. This ID describes the bitstream family, not the C API ABI.
 #define PYROWAVE_BITSTREAM_ID "186f0393"
+// The extended FEC block layout (up to 16 blocks per frame, see Video.h).
+#define PYROWAVE_FEC_BLOCKS_ATTRIBUTE "x-ss-pyrowave.fecBlocks"
+#define PYROWAVE_EXTENDED_FEC_BLOCKS_VALUE "16"
 #define SCM_PYROWAVE_RECORD_HDR444 0x04000000
 
 typedef struct _PYROWAVE_NEGOTIATION {
     PYROWAVE_DIALECT dialect;
     int format;
+    // The host offers the extended FEC block layout (see Video.h); echoed in ANNOUNCE.
+    int extendedFecBlocks;
     const char* error;
 } PYROWAVE_NEGOTIATION;
 
@@ -81,14 +86,18 @@ static inline PYROWAVE_VIDEO_PROFILE LiPyroWaveProfile(int format) {
 }
 
 static inline PYROWAVE_NEGOTIATION LiNegotiatePyroWave(int formats, int modes, const char* sdp) {
-    PYROWAVE_NEGOTIATION n = {PYROWAVE_DIALECT_NONE, 0, NULL};
+    PYROWAVE_NEGOTIATION n = {PYROWAVE_DIALECT_NONE, 0, 0, NULL};
     if (!(formats & VIDEO_FORMAT_MASK_PYROWAVE) || !sdp) return n;
-    char version[32] = {0}, bitstream[32] = {0}, dialects[96] = {0}, profiles[128] = {0};
+    char version[32] = {0}, bitstream[32] = {0}, dialects[96] = {0}, profiles[128] = {0}, fecBlocks[16] = {0};
     int v = LiSdpAttributeValue(sdp, "x-ss-pyrowave.version", version, sizeof(version));
     int b = LiSdpAttributeValue(sdp, "x-ss-pyrowave.bitstream", bitstream, sizeof(bitstream));
     int d = LiSdpAttributeValue(sdp, "x-ss-pyrowave.dialects", dialects, sizeof(dialects));
     int p = LiSdpAttributeValue(sdp, "x-ss-pyrowave.profiles", profiles, sizeof(profiles));
-    if (v < 0 || b < 0 || d < 0 || p < 0) { n.error = "Duplicate or oversized PyroWave capability attribute"; return n; }
+    int f = LiSdpAttributeValue(sdp, PYROWAVE_FEC_BLOCKS_ATTRIBUTE, fecBlocks, sizeof(fecBlocks));
+    if (v < 0 || b < 0 || d < 0 || p < 0 || f < 0) { n.error = "Duplicate or oversized PyroWave capability attribute"; return n; }
+    // Only the exact layout we implement is used. Another value is a layout of
+    // a newer host; it keeps GameStream's four blocks rather than failing.
+    n.extendedFecBlocks = f && !strcmp(fecBlocks, PYROWAVE_EXTENDED_FEC_BLOCKS_VALUE);
     if (b && strcmp(bitstream, PYROWAVE_BITSTREAM_ID)) {
         n.error = "PyroWave bitstream revision incompatible (client requires 186f0393)"; return n;
     }

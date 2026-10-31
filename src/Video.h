@@ -34,6 +34,26 @@ typedef struct _NV_VIDEO_PACKET {
     uint32_t fecInfo;
 } NV_VIDEO_PACKET, *PNV_VIDEO_PACKET;
 
+// NV_VIDEO_PACKET::multiFecBlocks carries the current FEC block index in bits
+// 4-5 and the last block index in bits 6-7, so GameStream frames span at most
+// four blocks. With the PyroWave extended layout (x-ss-pyrowave.fecBlocks:16,
+// offered by the host and echoed by us) bits 0-1 and 2-3 carry the high bits
+// of each index, for up to sixteen blocks. GameStream hosts leave them zero.
+#define PYROWAVE_EXTENDED_FEC_BLOCKS 16
+static inline uint8_t LiFecBlockIndex(uint8_t multiFecBlocks, bool extended) {
+    return (uint8_t)(((multiFecBlocks >> 4) & 0x3) | (extended ? (multiFecBlocks & 0x3) << 2 : 0));
+}
+static inline uint8_t LiFecLastBlockIndex(uint8_t multiFecBlocks, bool extended) {
+    return (uint8_t)(((multiFecBlocks >> 6) & 0x3) | (extended ? ((multiFecBlocks >> 2) & 0x3) << 2 : 0));
+}
+static inline uint8_t LiFecBlocksByte(uint8_t block, uint8_t lastBlock, bool extended) {
+    uint8_t value = (uint8_t)(((block & 0x3) << 4) | ((lastBlock & 0x3) << 6));
+    if (extended) {
+        value |= (uint8_t)(((block >> 2) & 0x3) | (((lastBlock >> 2) & 0x3) << 2));
+    }
+    return value;
+}
+
 #define FLAG_EXTENSION 0x10
 
 #define FIXED_RTP_HEADER_SIZE 12
