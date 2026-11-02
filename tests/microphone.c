@@ -34,7 +34,7 @@ static void test_packet(void) {
         for (int j = 0; j < length; j++) {
             opus[j] = (unsigned char)(j * 7 + 1);
         }
-        PPLT_CRYPTO_CONTEXT encrypt = PltCreateCryptoContext();
+        PPLT_CRYPTO_CONTEXT encrypt = PltCreateCryptoContext(0);
         int packetLength = buildMicrophonePacket(encrypt, KEY, 0xFFFFFFF0, 40, 1234, opus, length,
                                                  packet, sizeof(packet));
         PltDestroyCryptoContext(encrypt);
@@ -50,8 +50,8 @@ static void test_packet(void) {
         unsigned char iv[16] = { 0, 0, 0, 0x18 };
         unsigned char plaintext[1500];
         int plaintextLength = sizeof(plaintext);
-        PPLT_CRYPTO_CONTEXT decrypt = PltCreateCryptoContext();
-        assert(PltDecryptMessage(decrypt, ALGORITHM_AES_CBC, CIPHER_FLAG_RESET_IV | CIPHER_FLAG_FINISH,
+        PPLT_CRYPTO_CONTEXT decrypt = PltCreateCryptoContext(0);
+        assert(PltDecryptMessage(decrypt, ALGORITHM_AES_CBC, CIPHER_FLAG_RESET_IV | CIPHER_FLAG_FINISH, 0, 0,
                                  (unsigned char*)KEY, 16, iv, 16, NULL, 0,
                                  &packet[12], packetLength - 12, plaintext, &plaintextLength));
         PltDestroyCryptoContext(decrypt);
@@ -64,7 +64,7 @@ static void test_packet(void) {
 
     unsigned char packet[MAX_MIC_PACKET_SIZE];
     unsigned char big[1400] = { 0 };
-    PPLT_CRYPTO_CONTEXT ctx = PltCreateCryptoContext();
+    PPLT_CRYPTO_CONTEXT ctx = PltCreateCryptoContext(0);
     assert(buildMicrophonePacket(ctx, KEY, 0, 0, 0, big, 0, packet, sizeof(packet)) == -1);
     assert(buildMicrophonePacket(ctx, KEY, 0, 0, 0, big, 1357, packet, sizeof(packet)) == -1);
     assert(buildMicrophonePacket(ctx, KEY, 0, 0, 0, big, 100, packet, 100) == -1);

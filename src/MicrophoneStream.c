@@ -123,7 +123,7 @@ int initializeMicrophoneStream(void) {
         goto Exit;
     }
 
-    micEncryptionCtx = PltCreateCryptoContext();
+    micEncryptionCtx = PltCreateCryptoContext(0);
     if (micEncryptionCtx == NULL) {
         err = -1;
         goto Exit;
