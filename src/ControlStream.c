@@ -114,8 +114,9 @@ static uint32_t lastSeenFrame;
 static bool stopping;
 static bool disconnectPending;
 static bool encryptedControlStream;
-static bool hdrEnabled;
+static atomic_bool hdrEnabled;
 static SS_HDR_METADATA hdrMetadata;
+static PLT_MUTEX hdrMutex;
 
 static int intervalGoodFrameCount;
 static int intervalTotalFrameCount;
@@ -320,6 +321,7 @@ int initializeControlStream(void) {
     LbqInitializeLinkedBlockingQueue(&frameFecStatusQueue, 8); // Limits number of frame status reports per periodic ping interval
     LbqInitializeLinkedBlockingQueue(&asyncCallbackQueue, 30);
     PltCreateMutex(&enetMutex);
+    PltCreateMutex(&hdrMutex);
 
     encryptedControlStream = APP_VERSION_AT_LEAST(7, 1, 431);
 
@@ -369,7 +371,7 @@ int initializeControlStream(void) {
     usePeriodicPing = APP_VERSION_AT_LEAST(7, 1, 415);
     encryptionCtx = PltCreateCryptoContext(0);
     decryptionCtx = PltCreateCryptoContext(CTRL_CHANNEL_COUNT);
-    hdrEnabled = false;
+    atomic_store_explicit(&hdrEnabled, false, memory_order_relaxed);
     memset(&hdrMetadata, 0, sizeof(hdrMetadata));
 
     return 0;
@@ -395,6 +397,7 @@ void destroyControlStream(void) {
     freeBasicLbqList(LbqDestroyLinkedBlockingQueue(&frameFecStatusQueue));
     freeBasicLbqList(LbqDestroyLinkedBlockingQueue(&asyncCallbackQueue));
 
+    PltDeleteMutex(&hdrMutex);
     PltDeleteMutex(&enetMutex);
 }
 
@@ -405,14 +408,17 @@ static void queueFrameInvalidationTuple(uint32_t startFrame, uint32_t endFrame) 
         PQUEUED_REFERENCE_FRAME_CONTROL qfit;
         qfit = malloc(sizeof(*qfit));
         if (qfit != NULL) {
+            int err;
+
             *qfit = (QUEUED_REFERENCE_FRAME_CONTROL){
                 .startFrame = startFrame,
                 .endFrame = endFrame,
                 .invalidate = true,
             };
-            if (LbqOfferQueueItem(&referenceFrameControlQueue, qfit, &qfit->entry) == LBQ_BOUND_EXCEEDED) {
-                // Too many invalidation tuples, so we need an IDR frame now
-                Limelog("RFI range list reached maximum size limit\n");
+
+            err = LbqOfferQueueItem(&referenceFrameControlQueue, qfit, &qfit->entry);
+            if (err != LBQ_SUCCESS) {
+                Limelog("Failed to queue RFI range: %d\n", err);
                 free(qfit);
                 LiRequestIdrFrame();
             }
@@ -458,14 +464,18 @@ void connectionReceivedCompleteFrame(uint32_t frameIndex, bool frameIsLTR) {
         PQUEUED_REFERENCE_FRAME_CONTROL qfit;
         qfit = malloc(sizeof(*qfit));
         if (qfit != NULL) {
+            int err;
+
             *qfit = (QUEUED_REFERENCE_FRAME_CONTROL){
                 .startFrame = frameIndex,
                 .invalidate = false,
             };
-            if (LbqOfferQueueItem(&referenceFrameControlQueue, qfit, &qfit->entry) == LBQ_BOUND_EXCEEDED) {
+
+            err = LbqOfferQueueItem(&referenceFrameControlQueue, qfit, &qfit->entry);
+            if (err != LBQ_SUCCESS) {
                 // This shouldn't happen and indicates that something has gone wrong with the queue
                 LC_ASSERT(false);
-                Limelog("Couldn't queue LTR ACK because the list has reached maximum size limit\n");
+                Limelog("Couldn't queue LTR ACK: %d\n", err);
                 free(qfit);
                 LiRequestIdrFrame();
             }
@@ -483,14 +493,14 @@ void connectionSendFrameFecStatus(PSS_FRAME_FEC_STATUS fecStatus) {
     PQUEUED_FRAME_FEC_STATUS queuedFecStatus = malloc(sizeof(*queuedFecStatus));
     if (queuedFecStatus != NULL) {
         queuedFecStatus->fecStatus = *fecStatus;
-        if (LbqOfferQueueItem(&frameFecStatusQueue, queuedFecStatus, &queuedFecStatus->entry) == LBQ_BOUND_EXCEEDED) {
+        if (LbqOfferQueueItem(&frameFecStatusQueue, queuedFecStatus, &queuedFecStatus->entry) != LBQ_SUCCESS) {
             free(queuedFecStatus);
         }
     }
 }
 
 void connectionSawFrame(uint32_t frameIndex) {
-    LC_ASSERT_VT(!isBefore16(frameIndex, lastSeenFrame));
+    LC_ASSERT_VT(!isBefore32(frameIndex, lastSeenFrame));
 
     uint64_t now = PltGetMillis();
 
@@ -1038,10 +1048,25 @@ static bool sendMessageAndDiscardReply(short ptype, unsigned int paylen, const v
 // pending receives first. It works around what appears to be a bug in ENet
 // where pending disconnects can cause loss of unprocessed received data.
 static int ignoreDisconnectIntercept(ENetHost* host, ENetEvent* event) {
-    if (host->receivedDataLength == sizeof(ENetProtocolHeader) + sizeof(ENetProtocolDisconnect)) {
+    if (host->receivedDataLength >= sizeof(ENetProtocolCommandHeader)) {
         ENetProtocolHeader* protoHeader = (ENetProtocolHeader*)host->receivedData;
-        ENetProtocolDisconnect* disconnect = (ENetProtocolDisconnect*)(protoHeader + 1);
         enet_uint16 peerID = ENET_NET_TO_HOST_16(protoHeader->peerID);
+        size_t headerSize = (peerID & ENET_PROTOCOL_HEADER_FLAG_SENT_TIME) ?
+                            sizeof(ENetProtocolHeader) :
+                            sizeof(ENetProtocolHeader) - sizeof(protoHeader->sentTime);
+        ENetProtocolDisconnect* disconnect;
+
+        // ENet appends the checksum after the optional sentTime field.
+        if (host->checksum != NULL) {
+            headerSize += sizeof(enet_uint32);
+        }
+
+        // A disconnect datagram contains exactly one disconnect command.
+        if (host->receivedDataLength != headerSize + sizeof(ENetProtocolDisconnect)) {
+            return 0;
+        }
+
+        disconnect = (ENetProtocolDisconnect*)(host->receivedData + headerSize);
         enet_uint8 sessionID = (peerID & ENET_PROTOCOL_HEADER_SESSION_MASK) >> ENET_PROTOCOL_HEADER_SESSION_SHIFT;
 
         peerID &= ~(ENET_PROTOCOL_HEADER_FLAG_MASK | ENET_PROTOCOL_HEADER_SESSION_MASK);
@@ -1068,7 +1093,6 @@ static int ignoreDisconnectIntercept(ENetHost* host, ENetEvent* event) {
 
     return 0;
 }
-
 static void asyncCallbackThreadFunc(void* context) {
     PQUEUED_ASYNC_CALLBACK queuedCb, nextCb;
 
@@ -1158,7 +1182,7 @@ static void asyncCallbackThreadFunc(void* context) {
                 queuedCb = nextCb;
             }
 
-            ListenerCallbacks.setHdrMode(hdrEnabled);
+            ListenerCallbacks.setHdrMode(LiGetCurrentHostDisplayHdrMode());
             break;
 
         case IDX_SET_MOTION_EVENT:
@@ -1460,6 +1484,8 @@ static void controlReceiveThreadFunc(void* context) {
 
                 BbInitializeWrappedBuffer(&bb, (char*)ctlHdr, sizeof(*ctlHdr), packetLength - sizeof(*ctlHdr), BYTE_ORDER_LITTLE);
 
+                PltLockMutex(&hdrMutex);
+
                 BbGet8(&bb, &enableByte);
                 if (IS_SUNSHINE()) {
                     // Zero the metadata buffer to properly handle older servers if we have to add new fields
@@ -1479,7 +1505,9 @@ static void controlReceiveThreadFunc(void* context) {
                     BbGet16(&bb, &hdrMetadata.maxFullFrameLuminance);
                 }
 
-                hdrEnabled = (enableByte != 0);
+                atomic_store_explicit(&hdrEnabled, enableByte != 0, memory_order_release);
+
+                PltUnlockMutex(&hdrMutex);
             }
 
             // Process client callbacks in a separate thread
@@ -2263,14 +2291,24 @@ int startControlStream(void) {
 }
 
 bool LiGetCurrentHostDisplayHdrMode(void) {
-    return hdrEnabled;
+    return atomic_load_explicit(&hdrEnabled, memory_order_acquire);
 }
 
 bool LiGetHdrMetadata(PSS_HDR_METADATA metadata) {
-    if (!IS_SUNSHINE() || !hdrEnabled) {
+    if (!IS_SUNSHINE() || !atomic_load_explicit(&hdrEnabled, memory_order_acquire)) {
+        return false;
+    }
+
+    PltLockMutex(&hdrMutex);
+
+    // Check again inside the lock to make sure HDR is still enabled
+    if (!atomic_load_explicit(&hdrEnabled, memory_order_relaxed)) {
+        PltUnlockMutex(&hdrMutex);
         return false;
     }
 
     *metadata = hdrMetadata;
+    PltUnlockMutex(&hdrMutex);
+
     return true;
 }

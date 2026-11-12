@@ -934,8 +934,7 @@ int LiGetPendingAudioFrames(void);
 // negotiated audio frame duration.
 int LiGetPendingAudioDuration(void);
 
-// Returns a pointer to a struct containing various statistics about the RTP audio stream.
-// The data should be considered read-only and must not be modified.
+// Populates a caller-supplied struct containing various statistics about the RTP audio stream.
 typedef struct _RTP_AUDIO_STATS {
     uint32_t packetCountAudio;         // total audio packets
     uint32_t packetCountFec;           // total packets of type FEC
@@ -946,10 +945,9 @@ typedef struct _RTP_AUDIO_STATS {
     uint32_t packetCountFecInvalid;    // invalid FEC packet
 } RTP_AUDIO_STATS, *PRTP_AUDIO_STATS;
 
-const RTP_AUDIO_STATS* LiGetRTPAudioStats(void);
+void LiGetRTPAudioStats(PRTP_AUDIO_STATS stats);
 
-// Returns a pointer to a struct containing various statistics about the RTP video stream.
-// The data should be considered read-only and must not be modified.
+// Populates a caller-supplied struct containing various statistics about the RTP video stream.
 // Right now this is mainly used to track total video and FEC packets, as there are
 // many video stats already implemented at a higher level in moonlight-qt.
 typedef struct _RTP_VIDEO_STATS {
@@ -962,7 +960,7 @@ typedef struct _RTP_VIDEO_STATS {
     uint32_t packetCountFecInvalid;    // invalid FEC packet
 } RTP_VIDEO_STATS, *PRTP_VIDEO_STATS;
 
-const RTP_VIDEO_STATS* LiGetRTPVideoStats(void);
+void LiGetRTPVideoStats(PRTP_VIDEO_STATS stats);
 
 // Port index flags for use with LiGetPortFromPortFlagIndex() and LiGetProtocolFromPortFlagIndex()
 #define ML_PORT_INDEX_TCP_47984 0
@@ -1025,7 +1023,6 @@ unsigned int LiTestClientConnectivity(const char* testServer, unsigned short ref
 typedef void* VIDEO_FRAME_HANDLE;
 bool LiWaitForNextVideoFrame(VIDEO_FRAME_HANDLE* frameHandle, PDECODE_UNIT* decodeUnit);
 bool LiPollNextVideoFrame(VIDEO_FRAME_HANDLE* frameHandle, PDECODE_UNIT* decodeUnit);
-bool LiPeekNextVideoFrame(PDECODE_UNIT* decodeUnit);
 void LiWakeWaitForVideoFrame(void);
 void LiCompleteVideoFrame(VIDEO_FRAME_HANDLE handle, int drStatus);
 

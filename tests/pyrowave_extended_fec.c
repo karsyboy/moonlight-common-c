@@ -113,7 +113,7 @@ static unsigned run(bool extended, bool (*lose)(unsigned block, unsigned index),
             }
         }
     }
-    *stats = queue.stats;
+    RtpvGetStats(&queue, stats);
     RtpvCleanupQueue(&queue);
     destroyVideoDepacketizer();
     return delivered;

@@ -12,6 +12,7 @@
 #include "ByteBuffer.h"
 
 #include <enet/enet.h>
+#include <stdatomic.h>
 
 // Common globals
 extern char* RemoteAddrString;
@@ -27,7 +28,7 @@ extern int NegotiatedVideoFormat;
 // The PyroWave extended FEC block layout (up to 16 blocks, see Video.h), set by
 // the RTSP handshake when the host offered it; we echo it in ANNOUNCE.
 extern bool NegotiatedPyroWaveExtendedFecBlocks;
-extern volatile bool ConnectionInterrupted;
+extern atomic_bool ConnectionInterrupted;
 extern bool HighQualitySurroundSupported;
 extern bool HighQualitySurroundEnabled;
 extern OPUS_MULTISTREAM_CONFIGURATION NormalQualityOpusConfig;

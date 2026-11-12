@@ -2,7 +2,7 @@
 
 static SOCKET inputSock = INVALID_SOCKET;
 static unsigned char currentAesIv[16];
-static bool initialized;
+static atomic_bool initialized;
 static bool encryptedControlStream;
 static bool needsBatchedScroll;
 static int batchedScrollDelta;
@@ -245,7 +245,7 @@ static bool sendInputPacket(PPACKET_HOLDER holder, bool moreData) {
                                                         PACKET_SIZE(holder),
                                                         holder->channelId,
                                                         holder->enetPacketFlags,
-                                                        moreData);
+                                                        moreData || LbqGetItemCount(&packetQueue) > 0);
         if (err < 0) {
             Limelog("Input: sendInputPacketOnControlStream() failed: %d\n", (int) err);
             ListenerCallbacks.connectionTerminated(err);
@@ -296,7 +296,7 @@ static bool sendInputPacket(PPACKET_HOLDER holder, bool moreData) {
                                                             (unsigned int)(encryptedSize + sizeof(encryptedLengthPrefix)),
                                                             holder->channelId,
                                                             holder->enetPacketFlags,
-                                                            moreData);
+                                                            moreData || LbqGetItemCount(&packetQueue) > 0);
             if (err < 0) {
                 Limelog("Input: sendInputPacketOnControlStream() failed: %d\n", (int) err);
                 ListenerCallbacks.connectionTerminated(err);
@@ -644,8 +644,8 @@ static void inputSendThreadProc(void* context) {
             continue;
         }
 
-        // Encrypt and send the input packet
-        if (!sendInputPacket(holder, LbqGetItemCount(&packetQueue) > 0)) {
+        // Encrypt and send the input packet (sendInputPacket checks packetQueue for batching)
+        if (!sendInputPacket(holder, false)) {
             freePacketHolder(holder);
             return;
         }
@@ -711,7 +711,7 @@ int startInputStream(void) {
     }
 
     // Allow input packets to be queued now
-    initialized = true;
+    atomic_store_explicit(&initialized, true, memory_order_release);
 
     // GFE will not send haptics events without this magic packet first
     sendEnableHaptics();
@@ -722,7 +722,7 @@ int startInputStream(void) {
 // Stops the input stream
 int stopInputStream(void) {
     // No more packets should be queued now
-    initialized = false;
+    atomic_store_explicit(&initialized, false, memory_order_release);
     LbqSignalQueueShutdown(&packetHolderFreeList);
 
     // Signal the input send thread to drain all pending
@@ -748,7 +748,7 @@ int LiSendMouseMoveEvent(short deltaX, short deltaY) {
     int err;
     bool enqueueHolder = false;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -827,7 +827,7 @@ int LiSendMousePositionEvent(short x, short y, short referenceWidth, short refer
     int err;
     bool enqueueHolder = false;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -919,7 +919,7 @@ int LiSendMouseButtonEvent(char action, int button) {
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -961,7 +961,7 @@ int LiSendKeyboardEvent2(short keyCode, char keyAction, char modifiers, char fla
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1045,7 +1045,7 @@ int LiSendUtf8TextEvent(const char *text, unsigned int length) {
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1080,7 +1080,7 @@ static int sendControllerEventInternal(short controllerNumber, short activeGamep
     int err;
     bool enqueueHolder = false;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1152,6 +1152,38 @@ static int sendControllerEventInternal(short controllerNumber, short activeGamep
         // TODO: Send this as unreliable sequenced when we have a delayed reliable retransmission thread
         holder->enetPacketFlags = ENET_PACKET_FLAG_RELIABLE;
 
+        // Populate the constant fields before enqueuing to avoid a data race with
+        // the input stream thread which reads the magic and controller number
+        // values prior to acquiring the batchedInputMutex.
+        if (AppVersionQuad[0] == 3) {
+            holder->packet.controller.header.size = BE32(sizeof(NV_CONTROLLER_PACKET) - sizeof(uint32_t));
+            holder->packet.controller.header.magic = LE32(CONTROLLER_MAGIC);
+            holder->packet.controller.headerB = LE16(C_HEADER_B);
+            holder->packet.controller.buttonFlags = LE16(buttonFlags);
+            holder->packet.controller.tailA = LE32(C_TAIL_A);
+            holder->packet.controller.tailB = LE16(C_TAIL_B);
+        }
+        else {
+            // Generation 4+ servers support passing the controller number
+            holder->packet.multiController.header.size = BE32(sizeof(NV_MULTI_CONTROLLER_PACKET) - sizeof(uint32_t));
+
+            // On Gen 5 servers, the header code is decremented by one
+            if (AppVersionQuad[0] >= 5) {
+                holder->packet.multiController.header.magic = LE32(MULTI_CONTROLLER_MAGIC_GEN5);
+            }
+            else {
+                holder->packet.multiController.header.magic = LE32(MULTI_CONTROLLER_MAGIC);
+            }
+
+            holder->packet.multiController.headerB = LE16(MC_HEADER_B);
+            holder->packet.multiController.controllerNumber = LE16(controllerNumber);
+            holder->packet.multiController.midB = LE16(MC_MID_B);
+            holder->packet.multiController.buttonFlags = LE16((short)buttonFlags);
+            holder->packet.multiController.tailA = LE16(MC_TAIL_A);
+            holder->packet.multiController.buttonFlags2 = IS_SUNSHINE() ? LE16((short)(buttonFlags >> 16)) : 0;
+            holder->packet.multiController.tailB = LE16(MC_TAIL_B);
+        }
+
         // Remember that we need to enqueue this holder since it's new
         enqueueHolder = true;
 
@@ -1164,45 +1196,21 @@ static int sendControllerEventInternal(short controllerNumber, short activeGamep
     if (AppVersionQuad[0] == 3) {
         // Generation 3 servers don't support multiple controllers so we send
         // the legacy packet
-        holder->packet.controller.header.size = BE32(sizeof(NV_CONTROLLER_PACKET) - sizeof(uint32_t));
-        holder->packet.controller.header.magic = LE32(CONTROLLER_MAGIC);
-        holder->packet.controller.headerB = LE16(C_HEADER_B);
-        holder->packet.controller.buttonFlags = LE16(buttonFlags);
         holder->packet.controller.leftTrigger = leftTrigger;
         holder->packet.controller.rightTrigger = rightTrigger;
         holder->packet.controller.leftStickX = LE16(leftStickX);
         holder->packet.controller.leftStickY = LE16(leftStickY);
         holder->packet.controller.rightStickX = LE16(rightStickX);
         holder->packet.controller.rightStickY = LE16(rightStickY);
-        holder->packet.controller.tailA = LE32(C_TAIL_A);
-        holder->packet.controller.tailB = LE16(C_TAIL_B);
     }
     else {
-        // Generation 4+ servers support passing the controller number
-        holder->packet.multiController.header.size = BE32(sizeof(NV_MULTI_CONTROLLER_PACKET) - sizeof(uint32_t));
-
-        // On Gen 5 servers, the header code is decremented by one
-        if (AppVersionQuad[0] >= 5) {
-            holder->packet.multiController.header.magic = LE32(MULTI_CONTROLLER_MAGIC_GEN5);
-        }
-        else {
-            holder->packet.multiController.header.magic = LE32(MULTI_CONTROLLER_MAGIC);
-        }
-
-        holder->packet.multiController.headerB = LE16(MC_HEADER_B);
-        holder->packet.multiController.controllerNumber = LE16(controllerNumber);
         holder->packet.multiController.activeGamepadMask = LE16(activeGamepadMask);
-        holder->packet.multiController.midB = LE16(MC_MID_B);
-        holder->packet.multiController.buttonFlags = LE16((short)buttonFlags);
         holder->packet.multiController.leftTrigger = leftTrigger;
         holder->packet.multiController.rightTrigger = rightTrigger;
         holder->packet.multiController.leftStickX = LE16(leftStickX);
         holder->packet.multiController.leftStickY = LE16(leftStickY);
         holder->packet.multiController.rightStickX = LE16(rightStickX);
         holder->packet.multiController.rightStickY = LE16(rightStickY);
-        holder->packet.multiController.tailA = LE16(MC_TAIL_A);
-        holder->packet.multiController.buttonFlags2 = IS_SUNSHINE() ? LE16((short)(buttonFlags >> 16)) : 0;
-        holder->packet.multiController.tailB = LE16(MC_TAIL_B);
 
         if (enqueueHolder) {
             // Make this new packet holder the current enqueued packet
@@ -1268,7 +1276,7 @@ int LiSendHighResScrollEvent(short scrollAmount) {
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1368,7 +1376,7 @@ int LiSendHighResHScrollEvent(short scrollAmount) {
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1412,7 +1420,7 @@ int LiSendTouchEvent(uint8_t eventType, uint32_t pointerId, float x, float y, fl
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1461,7 +1469,7 @@ int LiSendPenEvent(uint8_t eventType, uint8_t toolType, uint8_t penButtons,
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1515,7 +1523,7 @@ int LiSendControllerArrivalEvent(uint8_t controllerNumber, uint16_t activeGamepa
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1562,7 +1570,7 @@ int LiSendControllerTouchEvent2(uint8_t controllerNumber, uint8_t eventType, uin
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1615,7 +1623,7 @@ int LiSendControllerMotionEvent(uint8_t controllerNumber, uint8_t motionType, fl
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
@@ -1686,7 +1694,7 @@ int LiSendControllerBatteryEvent(uint8_t controllerNumber, uint8_t batteryState,
     PPACKET_HOLDER holder;
     int err;
 
-    if (!initialized) {
+    if (!atomic_load_explicit(&initialized, memory_order_acquire)) {
         return -2;
     }
 
