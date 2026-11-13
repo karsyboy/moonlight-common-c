@@ -401,7 +401,7 @@ static void inputSendThreadProc(void* context) {
             // Delay for batching if required
             if (now < lastMousePacketTime + MOUSE_BATCHING_INTERVAL_MS) {
                 flushInputOnControlStream();
-                PltSleepMs((int)(lastMousePacketTime + MOUSE_BATCHING_INTERVAL_MS - now));
+                PltSleepMs((uint32_t)(lastMousePacketTime + MOUSE_BATCHING_INTERVAL_MS - now));
                 now = PltGetMillis();
             }
 
@@ -471,7 +471,7 @@ static void inputSendThreadProc(void* context) {
             // Delay for batching if required
             if (now < lastMousePacketTime + MOUSE_BATCHING_INTERVAL_MS) {
                 flushInputOnControlStream();
-                PltSleepMs((int)(lastMousePacketTime + MOUSE_BATCHING_INTERVAL_MS - now));
+                PltSleepMs((uint32_t)(lastMousePacketTime + MOUSE_BATCHING_INTERVAL_MS - now));
                 now = PltGetMillis();
             }
 
@@ -492,7 +492,7 @@ static void inputSendThreadProc(void* context) {
             // Delay for batching if required
             if (now < lastPenPacketTime + PEN_BATCHING_INTERVAL_MS) {
                 flushInputOnControlStream();
-                PltSleepMs((int)(lastPenPacketTime + PEN_BATCHING_INTERVAL_MS - now));
+                PltSleepMs((uint32_t)(lastPenPacketTime + PEN_BATCHING_INTERVAL_MS - now));
                 now = PltGetMillis();
             }
 
@@ -1072,7 +1072,7 @@ int LiSendUtf8TextEvent(const char *text, unsigned int length) {
     return err;
 }
 
-static int sendControllerEventInternal(short controllerNumber, short activeGamepadMask,
+static int sendControllerEventInternal(uint8_t controllerNumber, uint16_t activeGamepadMask,
     int buttonFlags, unsigned char leftTrigger, unsigned char rightTrigger,
     short leftStickX, short leftStickY, short rightStickX, short rightStickY)
 {
@@ -1262,7 +1262,7 @@ int LiSendControllerEvent(int buttonFlags, unsigned char leftTrigger, unsigned c
 }
 
 // Send a controller event to the streaming machine
-int LiSendMultiControllerEvent(short controllerNumber, short activeGamepadMask,
+int LiSendMultiControllerEvent(uint8_t controllerNumber, uint16_t activeGamepadMask,
     int buttonFlags, unsigned char leftTrigger, unsigned char rightTrigger,
     short leftStickX, short leftStickY, short rightStickX, short rightStickY)
 {
@@ -1628,7 +1628,8 @@ int LiSendControllerMotionEvent(uint8_t controllerNumber, uint8_t motionType, fl
     }
 
     // Check for valid motion type values
-    if (motionType - 1 >= MAX_MOTION_EVENTS) {
+    if (motionType <= 0 || motionType - 1 >= MAX_MOTION_EVENTS) {
+        LC_ASSERT(motionType > 0);
         LC_ASSERT(motionType - 1 < MAX_MOTION_EVENTS);
         return -3;
     }

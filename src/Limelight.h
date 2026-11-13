@@ -320,6 +320,10 @@ const char* LiGetPyroWaveCompatibilityError(void);
 // supports reference frame invalidation for AV1 streams. This flag is only valid on video renderers.
 #define CAPABILITY_REFERENCE_FRAME_INVALIDATION_AV1 0x40
 
+// If set in the video renderer capabilities field, this flag specifies that the renderer
+// needs to opt-in to intra refresh, some clients (like the Xbox client with NVEnc) needs it
+#define CAPABILITY_INTRA_REFRESH 0x80
+
 // If set in the video renderer capabilities field, this macro specifies that the renderer
 // supports slicing to increase decoding performance. The parameter specifies the desired
 // number of slices per frame. This capability is only valid on video renderers.
@@ -811,7 +815,7 @@ int LiSendControllerEvent(int buttonFlags, unsigned char leftTrigger, unsigned c
 //
 // To indicate removal of a gamepad, send an empty event with the controller number set to the
 // removed controller and the bit of the removed controller cleared in the active gamepad mask.
-int LiSendMultiControllerEvent(short controllerNumber, short activeGamepadMask,
+int LiSendMultiControllerEvent(uint8_t controllerNumber, uint16_t activeGamepadMask,
     int buttonFlags, unsigned char leftTrigger, unsigned char rightTrigger,
     short leftStickX, short leftStickY, short rightStickX, short rightStickY);
 

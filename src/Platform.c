@@ -5,6 +5,14 @@
 #include <psp2/kernel/processmgr.h>
 #endif
 
+#ifndef HAVE_CLOCK_GETTIME
+#ifdef CLOCK_MONOTONIC
+#define HAVE_CLOCK_GETTIME 1
+#else
+#define HAVE_CLOCK_GETTIME 0
+#endif
+#endif
+
 // The maximum amount of time before observing an interrupt
 // in PltSleepMsInterruptible().
 #define INTERRUPT_PERIOD_MS 50
@@ -104,21 +112,25 @@ void* ThreadProc(void* context) {
 #endif
 }
 
-void PltSleepMs(int ms) {
+void PltSleepMs(uint32_t ms) {
 #if defined(LC_WINDOWS)
     SleepEx(ms, FALSE);
 #elif defined(__3DS__)
-    s64 nsecs = ms * 1000000;
+    s64 nsecs = (s64)ms * 1000000LL;
     svcSleepThread(nsecs);
 #else
-    useconds_t usecs = ms * 1000;
-    usleep(usecs);
+    struct timespec req;
+
+    req.tv_sec = (time_t)(ms / 1000);
+    req.tv_nsec = (long)(ms % 1000) * 1000000L;
+
+    while (nanosleep(&req, &req) == -1 && errno == EINTR);
 #endif
 }
 
-void PltSleepMsInterruptible(PLT_THREAD* thread, int ms) {
+void PltSleepMsInterruptible(PLT_THREAD* thread, uint32_t ms) {
     while (ms > 0 && !PltIsThreadInterrupted(thread)) {
-        int msToSleep = ms < INTERRUPT_PERIOD_MS ? ms : INTERRUPT_PERIOD_MS;
+        uint32_t msToSleep = ms < INTERRUPT_PERIOD_MS ? ms : INTERRUPT_PERIOD_MS;
         PltSleepMs(msToSleep);
         ms -= msToSleep;
     }
@@ -163,6 +175,18 @@ void PltLockMutex(PLT_MUTEX* mutex) {
     LightLock_Lock(mutex);
 #else
     pthread_mutex_lock(mutex);
+#endif
+}
+
+bool PltTryLockMutex(PLT_MUTEX* mutex) {
+#if defined(LC_WINDOWS)
+    return TryAcquireSRWLockExclusive(mutex);
+#elif defined(__WIIU__)
+    return OSFastMutex_TryLock(mutex);
+#elif defined(__3DS__)
+    return LightLock_TryLock(mutex) == 0;
+#else
+    return pthread_mutex_trylock(mutex) == 0;
 #endif
 }
 
@@ -492,25 +516,14 @@ uint64_t PltGetMicroseconds(void) {
     if (atomic_load_explicit(&ticks_init_state, memory_order_acquire) != TICKS_INIT_COMPLETED) {
         PltTicksInit();
     }
+
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
-    return (uint64_t)(((now.QuadPart - start_ticks.QuadPart) * 1000000) / ticks_per_second.QuadPart);
-}
 
-#elif defined(LC_DARWIN)
+    int64_t elapsed = now.QuadPart - start_ticks.QuadPart;
+    int64_t freq = ticks_per_second.QuadPart;
 
-static uint64_t start_ns;
-
-static void PltTicksInitInternal(void) {
-    start_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-}
-
-uint64_t PltGetMicroseconds(void) {
-    if (atomic_load_explicit(&ticks_init_state, memory_order_acquire) != TICKS_INIT_COMPLETED) {
-        PltTicksInit();
-    }
-    const uint64_t now_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-    return (now_ns - start_ns) / 1000;
+    return (uint64_t)((elapsed / freq) * 1000000 + ((elapsed % freq) * 1000000) / freq);
 }
 
 #elif defined(__vita__)
@@ -548,7 +561,7 @@ uint64_t PltGetMicroseconds(void) {
 #else
 
 /* Use CLOCK_MONOTONIC_RAW, if available, which is not subject to adjustment by NTP */
-#ifdef HAVE_CLOCK_GETTIME
+#if HAVE_CLOCK_GETTIME
 static struct timespec start_ts;
 # ifdef CLOCK_MONOTONIC_RAW
 #  define PLT_MONOTONIC_CLOCK CLOCK_MONOTONIC_RAW
@@ -561,7 +574,7 @@ static bool has_monotonic_time = false;
 static struct timeval start_tv;
 
 static void PltTicksInitInternal(void) {
-#ifdef HAVE_CLOCK_GETTIME
+#if HAVE_CLOCK_GETTIME
     if (clock_gettime(PLT_MONOTONIC_CLOCK, &start_ts) == 0) {
         has_monotonic_time = true;
     } else
@@ -577,7 +590,7 @@ uint64_t PltGetMicroseconds(void) {
     }
 
     if (has_monotonic_time) {
-#ifdef HAVE_CLOCK_GETTIME
+#if HAVE_CLOCK_GETTIME
         struct timespec now;
         clock_gettime(PLT_MONOTONIC_CLOCK, &now);
         return (uint64_t)(((int64_t)(now.tv_sec - start_ts.tv_sec) * 1000000) + ((now.tv_nsec - start_ts.tv_nsec) / 1000));

@@ -52,6 +52,7 @@ typedef struct _PLT_EVENT {
 int PltCreateMutex(PLT_MUTEX* mutex);
 void PltDeleteMutex(PLT_MUTEX* mutex);
 void PltLockMutex(PLT_MUTEX* mutex);
+bool PltTryLockMutex(PLT_MUTEX* mutex);
 void PltUnlockMutex(PLT_MUTEX* mutex);
 
 int PltCreateThread(const char* name, ThreadEntry entry, void* context, PLT_THREAD* thread);
@@ -72,5 +73,5 @@ void PltSignalConditionVariable(PLT_COND* cond);
 void PltBroadcastConditionVariable(PLT_COND* cond);
 void PltWaitForConditionVariable(PLT_COND* cond, PLT_MUTEX* mutex);
 
-void PltSleepMs(int ms);
-void PltSleepMsInterruptible(PLT_THREAD* thread, int ms);
+void PltSleepMs(uint32_t ms);
+void PltSleepMsInterruptible(PLT_THREAD* thread, uint32_t ms);

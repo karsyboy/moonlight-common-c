@@ -967,6 +967,7 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
     AudioEncryptionEnabled = false;
     HostAudioQualityLevel = -1;
     encryptedRtspEnabled = serverInfo->rtspSessionUrl && strstr(serverInfo->rtspSessionUrl, "rtspenc://");
+    encryptionSequenceNumber = 0;
     encryptionCtx = PltCreateCryptoContext(0);
     decryptionCtx = PltCreateCryptoContext(1);
 

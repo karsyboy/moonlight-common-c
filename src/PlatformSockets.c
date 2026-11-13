@@ -149,17 +149,21 @@ int pollSockets(struct pollfd* pollFds, int pollFdsCount, int timeoutMs) {
 
     return err;
 #elif defined(__3DS__)
-    int err;
-    u64 poll_start = osGetTime();
-    // seems like timeoutMs is never negative
-    for (u64 i = poll_start; (i - poll_start) < (u64)timeoutMs; i = osGetTime()) {
-        err = poll(pollFds, pollFdsCount, 0); // This is running for 14ms
-        if (err) {
-            break;
+    if (timeoutMs > 0) {
+        int err;
+        u64 poll_start = osGetTime();
+        for (u64 i = poll_start; (i - poll_start) < (u64)timeoutMs; i = osGetTime()) {
+            err = poll(pollFds, pollFdsCount, 0); // This is running for 14ms
+            if (err) {
+                break;
+            }
+            svcSleepThread(1000);
         }
-        svcSleepThread(1000);
+        return err;
     }
-    return err;
+    else {
+        return poll(pollFds, pollFdsCount, timeoutMs);
+    }
 #else
     return poll(pollFds, pollFdsCount, timeoutMs);
 #endif
@@ -816,7 +820,7 @@ bool isInSubnetV6(struct sockaddr_in6* sin6, unsigned char* subnet, int prefixLe
     int i;
 
     for (i = 0; i < prefixLength; i++) {
-        unsigned char mask = 1 << (i % 8);
+        unsigned char mask = 0x80 >> (i % 8);
         if ((sin6->sin6_addr.s6_addr[i / 8] & mask) != (subnet[i / 8] & mask)) {
             return false;
         }
